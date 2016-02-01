@@ -2,41 +2,67 @@ package main
 
 import (
 	"fmt"
-	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"./service"
 )
 
 var (
-	envCmd = &cobra.Command{
-		Use:   "env",
-		Short: "Extract a secret into an environment file.",
-		Run:   runEnv,
-	}
-	envFlags struct {
-		KeyName string
+	cmdExtractEnv = &cobra.Command{
+		Use:     "env",
+		Short:   "Extract a secret into an environment file.",
+		Example: "--target=<file-path> <environment-key>=<secret-path>[#<secret-field>]...",
+		Run:     cmdExtractEnvRun,
 	}
 )
 
 func init() {
-	envCmd.Flags().StringVar(&envFlags.KeyName, "key", "", "key of environment variable")
+	cmdExtract.AddCommand(cmdExtractEnv)
 }
 
-func runEnv(cmd *cobra.Command, args []string) {
-	if envFlags.KeyName == "" {
-		Exitf("key not set\n")
+func cmdExtractEnvRun(cmd *cobra.Command, args []string) {
+	// Check arguments
+	if len(args) == 0 {
+		Exitf("Private at least one argument: <key>=<path>[#field]")
 	}
-	// get secret
-	secret, err := extractSecret(globalFlags.secretPath, globalFlags.secretField)
+
+	// Parse arguments
+	secrets := []service.EnvSecret{}
+	for _, arg := range args {
+		secret, err := parseEnvSecret(arg)
+		if err != nil {
+			Exitf(err.Error())
+		}
+		secrets = append(secrets, secret)
+	}
+
+	// Login
+	vs, err := serverLogin()
 	if err != nil {
-		Exitf("Failed to extract secret: %v\n", err)
+		Exitf("Login failed: %v", err)
 	}
 
-	// format environment file
-	content := fmt.Sprintf("%s=%s\n", envFlags.KeyName, strconv.Quote(secret))
-
-	// save environment file
-	if err := saveTargetFile(globalFlags.targetFilePath, content); err != nil {
-		Exitf("Failed to created %s: %v\n", globalFlags.targetFilePath, err)
+	// Create env file
+	if err := vs.CreateEnvironmentFile(extractFlags.targetFilePath, secrets); err != nil {
+		Exitf("Secret extraction failed: %v", err)
 	}
+}
+
+func parseEnvSecret(arg string) (service.EnvSecret, error) {
+	kv := strings.Split(arg, "=")
+	if len(kv) != 2 {
+		return service.EnvSecret{}, maskAny(fmt.Errorf("expected '<key>=<path>[#field]', got '%s'", arg))
+	}
+	envKey := kv[0]
+	secretPath, secretField, err := parseSecretPath(kv[1])
+	if err != nil {
+		return service.EnvSecret{}, maskAny(err)
+	}
+	return service.EnvSecret{
+		SecretPath:     secretPath,
+		SecretField:    secretField,
+		EnvironmentKey: envKey,
+	}, nil
 }

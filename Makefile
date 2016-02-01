@@ -19,10 +19,10 @@ GOPATH := $(GOBUILDDIR)
 GOVERSION := 1.5.3
 
 ifndef GOOS
-	GOOS := $(shell go env GOOS)
+	GOOS := linux
 endif
 ifndef GOARCH
-	GOARCH := $(shell go env GOARCH)
+	GOARCH := amd64
 endif
 
 SOURCES := $(shell find $(SRCDIR) -name '*.go')

@@ -3,40 +3,58 @@ package main
 import (
 	"fmt"
 
-	"github.com/hashicorp/vault/api"
+	"github.com/spf13/cobra"
+
+	"./service"
 )
 
-// extractSecret extracts a secret based on given variables
-func extractSecret(secretPath, secretField string) (string, error) {
-	if secretPath == "" {
-		return "", maskAny(fmt.Errorf("path not set"))
-	}
-	if secretField == "" {
-		return "", maskAny(fmt.Errorf("field not set"))
+const (
+	defaultClusterIDPath = "/etc/pulcy/cluster-id"
+	defaultMachineIDPath = "/etc/machine-id"
+)
+
+var (
+	cmdExtract = &cobra.Command{
+		Use: "extract",
+		Run: showUsage,
 	}
 
-	// Create a vault client
-	config := api.DefaultConfig()
-	if err := config.ReadEnvironment(); err != nil {
-		return "", maskAny(err)
+	extractFlags struct {
+		targetFilePath string
+		service.ServerLoginData
 	}
-	client, err := api.NewClient(config)
+)
+
+func init() {
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.targetFilePath, "target", "", "Path of target file")
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.JobID, "job-id", "", "Identifier for the current job")
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.ClusterIDPath, "cluster-id-path", defaultClusterIDPath, "Path of cluster-id file")
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.MachineIDPath, "machine-id-path", defaultMachineIDPath, "Path of machine-id file")
+	cmdMain.AddCommand(cmdExtract)
+}
+
+// serverLogin initialized a VaultServices and tries to perform a server login.
+func serverLogin() (*service.VaultService, error) {
+	// Check arguments
+	if extractFlags.JobID == "" {
+		return nil, maskAny(fmt.Errorf("--job-id missing"))
+	}
+	if extractFlags.ClusterIDPath == "" {
+		return nil, maskAny(fmt.Errorf("--cluster-id-path missing"))
+	}
+	if extractFlags.MachineIDPath == "" {
+		return nil, maskAny(fmt.Errorf("--machine-id-path missing"))
+	}
+
+	// Create service
+	vs, err := service.NewVaultService()
 	if err != nil {
-		return "", maskAny(err)
+		return nil, maskAny(err)
 	}
 
-	// Load secret
-	secret, err := client.Logical().Read(secretPath)
-	if err != nil {
-		return "", maskAny(fmt.Errorf("Error reading %s: %s", secretPath, err))
+	// Perform server login
+	if err := vs.ServerLogin(extractFlags.ServerLoginData); err != nil {
+		return nil, maskAny(err)
 	}
-	if secret == nil {
-		return "", maskAny(fmt.Errorf("No value found at %s", secretPath))
-	}
-
-	if value, ok := secret.Data[secretField]; !ok {
-		return "", maskAny(fmt.Errorf("No field '%s' found at %s", secretField, secretPath))
-	} else {
-		return value.(string), nil
-	}
+	return vs, nil
 }
