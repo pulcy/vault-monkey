@@ -9,6 +9,11 @@ import (
 	"github.com/juju/errgo"
 )
 
+const (
+	clusterAuthPathPrefix = "generic/cluster-auth/"
+	clusterAuthPathTmpl   = clusterAuthPathPrefix + "%s/job/%s"
+)
+
 type ServerLoginData struct {
 	JobID         string
 	ClusterIDPath string
@@ -43,7 +48,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	}
 
 	// Read cluster/job specific user-id
-	userIdPath := fmt.Sprintf("generic/cluster-auth/%s/job/%s", clusterID, data.JobID)
+	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterID, data.JobID)
 	userIdSecret, err := logical.Read(userIdPath)
 	if err != nil {
 		s.vaultClient.ClearToken()

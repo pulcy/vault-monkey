@@ -31,6 +31,9 @@ SOURCES := $(shell find $(SRCDIR) -name '*.go')
 
 all: $(BIN)
 
+local:
+	@${MAKE} -B GOOS=$(shell go env GOHOSTOS) GOARCH=$(shell go env GOHOSTARCH) $(BIN)
+
 clean:
 	rm -Rf $(BIN) $(GOBUILDDIR)
 

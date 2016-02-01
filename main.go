@@ -65,3 +65,9 @@ func assert(err error) {
 		Exitf("Assertion failed: %#v", err)
 	}
 }
+
+func assertArgIsSet(arg, argKey string) {
+	if arg == "" {
+		Exitf("%s must be set\n", argKey)
+	}
+}
