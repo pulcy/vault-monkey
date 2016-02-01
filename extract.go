@@ -15,8 +15,9 @@ const (
 
 var (
 	cmdExtract = &cobra.Command{
-		Use: "extract",
-		Run: showUsage,
+		Use:   "extract",
+		Short: "Server commands to extract secrects from the vault",
+		Run:   showUsage,
 	}
 
 	extractFlags struct {
