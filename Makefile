@@ -44,6 +44,7 @@ $(GOBUILDDIR):
 	@mkdir -p $(ORGDIR)
 	@rm -f $(REPODIR) && ln -s ../../../.. $(REPODIR)
 	@cd $(GOPATH) && pulcy go get \
+		github.com/dchest/uniuri \
 		github.com/hashicorp/hcl \
 		github.com/hashicorp/vault/api \
 		github.com/juju/errgo \

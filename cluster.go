@@ -7,7 +7,7 @@ import (
 var (
 	cmdCluster = &cobra.Command{
 		Use:   "cluster",
-		Short: "Commands to manipulate vault information for clusters",
+		Short: "Administator commands to manipulate vault information for clusters",
 		Run:   showUsage,
 	}
 

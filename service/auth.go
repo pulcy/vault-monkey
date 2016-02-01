@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	clusterAuthPathPrefix = "generic/cluster-auth/"
-	clusterAuthPathTmpl   = clusterAuthPathPrefix + "%s/job/%s"
+	clusterAuthPathPrefix  = "generic/cluster-auth/"
+	clusterAuthPathTmpl    = clusterAuthPathPrefix + "%s/job/%s"
+	clusterAuthUserIdField = "user-id"
 )
 
 type ServerLoginData struct {
@@ -56,7 +57,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	}
 
 	// Fetch user-id field
-	userId, ok := userIdSecret.Data["user-id"]
+	userId, ok := userIdSecret.Data[clusterAuthUserIdField]
 	if !ok {
 		return maskAny(errgo.WithCausef(nil, VaultError, "missing 'user-id' field at '%s'", userIdPath))
 	}
