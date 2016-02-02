@@ -26,7 +26,12 @@ func adminLogin() (*service.VaultService, error) {
 		return nil, maskAny(err)
 	}
 
-	// TODO login if token == ""
+	// Login with github (if available)
+	if err := vs.GithubLogin(service.GithubLoginData{
+		GithubToken: globalFlags.githubToken,
+	}); err != nil {
+		return nil, maskAny(err)
+	}
 
 	return vs, nil
 }

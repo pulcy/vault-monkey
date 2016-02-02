@@ -15,12 +15,17 @@
 package service
 
 import (
+	"crypto/x509"
+	"net/http"
+
 	"github.com/hashicorp/vault/api"
 )
 
 type VaultServiceConfig struct {
-	VaultAddr string // URL of the vault
-	TokenPath string // Path of a file containing the login token
+	VaultAddr   string // URL of the vault
+	VaultCACert string //  	Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate
+	VaultCAPath string // Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate
+	TokenPath   string // Path of a file containing the login token
 }
 
 type VaultService struct {
@@ -46,6 +51,19 @@ func NewVaultService(srvCfg VaultServiceConfig) (*VaultService, error) {
 			return nil, maskAny(err)
 		}
 		client.SetToken(token)
+	}
+	if srvCfg.VaultCACert != "" || srvCfg.VaultCAPath != "" {
+		var newCertPool *x509.CertPool
+		if srvCfg.VaultCACert != "" {
+			newCertPool, err = api.LoadCACert(srvCfg.VaultCACert)
+		} else {
+			newCertPool, err = api.LoadCAPath(srvCfg.VaultCAPath)
+		}
+		if err != nil {
+			return nil, maskAny(err)
+		}
+		clientTLSConfig := config.HttpClient.Transport.(*http.Transport).TLSClientConfig
+		clientTLSConfig.RootCAs = newCertPool
 	}
 
 	return &VaultService{
