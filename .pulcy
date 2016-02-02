@@ -1,0 +1,5 @@
+{
+	"registry": "pulcy",
+	"image": "vault-monkey",
+	"tag-latest": true
+}
