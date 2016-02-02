@@ -7,6 +7,7 @@ COMMIT := $(shell git rev-parse --short HEAD)
 GOBUILDDIR := $(SCRIPTDIR)/.gobuild
 SRCDIR := $(SCRIPTDIR)
 BINDIR := $(ROOTDIR)
+VENDORDIR := $(SCRIPTDIR)/vendor
 
 ORGPATH := git.pulcy.com/pulcy
 ORGDIR := $(GOBUILDDIR)/src/$(ORGPATH)
@@ -43,7 +44,10 @@ deps:
 $(GOBUILDDIR):
 	@mkdir -p $(ORGDIR)
 	@rm -f $(REPODIR) && ln -s ../../../.. $(REPODIR)
-	@cd $(GOPATH) && pulcy go get \
+
+update-vendor:
+	@rm -Rf $(VENDORDIR)
+	@pulcy go vendor -V $(VENDORDIR) \
 		github.com/dchest/uniuri \
 		github.com/hashicorp/hcl \
 		github.com/hashicorp/vault/api \
@@ -58,9 +62,10 @@ $(BIN): $(GOBUILDDIR) $(SOURCES)
 	docker run \
 	    --rm \
 	    -v $(ROOTDIR):/usr/code \
+	    -e GO15VENDOREXPERIMENT=1 \
 	    -e GOPATH=/usr/code/.gobuild \
 	    -e GOOS=$(GOOS) \
 	    -e GOARCH=$(GOARCH) \
 	    -w /usr/code/ \
 	    golang:$(GOVERSION) \
-	    go build -a -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT)
+	    go build -a -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT) $(REPOPATH)

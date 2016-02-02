@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"./service"
+	"git.pulcy.com/pulcy/vault-monkey/service"
 )
 
 var (

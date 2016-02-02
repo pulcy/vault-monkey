@@ -1,7 +1,7 @@
 package main
 
 import (
-	"./service"
+	"git.pulcy.com/pulcy/vault-monkey/service"
 )
 
 // adminLogin initialized a VaultServices and tries to perform a administrator login (if needed).
