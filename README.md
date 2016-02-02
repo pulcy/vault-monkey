@@ -11,13 +11,13 @@ It is designed to be used in a micro-service environment running autonomously.
 
 Example:
 
-`vault-monkey extract env --target /tmp/mysecrets KEY1=/generic/somekey#myfield KEY2=/generic/otherkey`
+`vault-monkey extract env --target /tmp/mysecrets KEY1=/secret/somekey#myfield KEY2=/secret/otherkey`
 
 This command results in a file in `/tmp/mysecrets` containing:
 
 ```
-KEY1="content of 'myfield' field under '/generic/somekey' path"
-KEY2="content of 'value' field under '/generic/otherkey' path"
+KEY1="content of 'myfield' field under '/secret/somekey' path"
+KEY2="content of 'value' field under '/secret/otherkey' path"
 ```
 
 ### Extract a secret as a file
@@ -26,10 +26,10 @@ KEY2="content of 'value' field under '/generic/otherkey' path"
 
 Example:
 
-`vault-monkey extract file --target /tmp/myfile /generic/somekey#myfield`
+`vault-monkey extract file --target /tmp/myfile /secret/somekey#myfield`
 
 This command results in a file in `/tmp/myfile` containing the content
-of the 'myfield' under '/generic/somekey' path.
+of the 'myfield' under '/secret/somekey' path.
 
 ## Building
 
@@ -70,7 +70,7 @@ cluster/job pair.
 
 This pair must be stored under:
 
-- Path: `/generic/cluster-auth/{cluster-id}/job/{job-id}`
+- Path: `/secret/cluster-auth/{cluster-id}/job/{job-id}`
 - Field: `user-id`
 
 ### Step 2: Job specific login

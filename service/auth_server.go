@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	clusterAuthPathPrefix  = "generic/cluster-auth/"
+	clusterAuthPathPrefix  = "secret/cluster-auth/"
 	clusterAuthPathTmpl    = clusterAuthPathPrefix + "%s/job/%s"
 	clusterAuthUserIdField = "user-id"
 )
