@@ -20,7 +20,6 @@ KEY1="content of 'myfield' field under '/generic/somekey' path"
 KEY2="content of 'value' field under '/generic/otherkey' path"
 ```
 
-
 ### Extract a secret as a file
 
 `vault-monkey extract file --target <environment-file-path> <path>[#<field]`
@@ -31,6 +30,14 @@ Example:
 
 This command results in a file in `/tmp/myfile` containing the content
 of the 'myfield' under '/generic/somekey' path.
+
+## Building
+
+Run:
+
+```
+make
+```
 
 ## Authentication Scheme
 
