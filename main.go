@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/juju/errgo"
+	"github.com/op/go-logging"
 	"github.com/spf13/cobra"
 
 	"git.pulcy.com/pulcy/vault-monkey/service"
@@ -43,6 +44,7 @@ var (
 		service.VaultServiceConfig
 		githubToken string
 	}
+	log = logging.MustGetLogger(cmdMain.Use)
 )
 
 func init() {

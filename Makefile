@@ -55,6 +55,7 @@ update-vendor:
 		github.com/kardianos/osext \
 		github.com/kr/pretty \
 		github.com/mitchellh/mapstructure \
+		github.com/op/go-logging \
 		github.com/spf13/cobra \
 		github.com/spf13/pflag
 

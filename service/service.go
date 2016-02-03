@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"github.com/hashicorp/vault/api"
+	"github.com/op/go-logging"
 )
 
 type VaultServiceConfig struct {
@@ -29,16 +30,18 @@ type VaultServiceConfig struct {
 }
 
 type VaultService struct {
+	log         *logging.Logger
 	vaultClient *api.Client
 }
 
-func NewVaultService(srvCfg VaultServiceConfig) (*VaultService, error) {
+func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultService, error) {
 	// Create a vault client
 	config := api.DefaultConfig()
 	if err := config.ReadEnvironment(); err != nil {
 		return nil, maskAny(err)
 	}
 	if srvCfg.VaultAddr != "" {
+		log.Debug("Setting vault address to %s", srvCfg.VaultAddr)
 		config.Address = srvCfg.VaultAddr
 	}
 	client, err := api.NewClient(config)
@@ -46,6 +49,7 @@ func NewVaultService(srvCfg VaultServiceConfig) (*VaultService, error) {
 		return nil, maskAny(err)
 	}
 	if srvCfg.TokenPath != "" {
+		log.Debug("Loading token from %s", srvCfg.TokenPath)
 		token, err := readID(srvCfg.TokenPath)
 		if err != nil {
 			return nil, maskAny(err)
@@ -55,8 +59,10 @@ func NewVaultService(srvCfg VaultServiceConfig) (*VaultService, error) {
 	if srvCfg.VaultCACert != "" || srvCfg.VaultCAPath != "" {
 		var newCertPool *x509.CertPool
 		if srvCfg.VaultCACert != "" {
+			log.Debug("Loading CA cert: %s", srvCfg.VaultCACert)
 			newCertPool, err = api.LoadCACert(srvCfg.VaultCACert)
 		} else {
+			log.Debug("Loading CA certs from: %s", srvCfg.VaultCAPath)
 			newCertPool, err = api.LoadCAPath(srvCfg.VaultCAPath)
 		}
 		if err != nil {
@@ -67,6 +73,7 @@ func NewVaultService(srvCfg VaultServiceConfig) (*VaultService, error) {
 	}
 
 	return &VaultService{
+		log:         log,
 		vaultClient: client,
 	}, nil
 }

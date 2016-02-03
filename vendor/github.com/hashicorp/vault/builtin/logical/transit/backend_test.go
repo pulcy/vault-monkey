@@ -39,6 +39,19 @@ func TestBackend_basic(t *testing.T) {
 	})
 }
 
+func TestBackend_upsert(t *testing.T) {
+	decryptData := make(map[string]interface{})
+	logicaltest.Test(t, logicaltest.TestCase{
+		Factory: Factory,
+		Steps: []logicaltest.TestStep{
+			testAccStepReadPolicy(t, "test", true, false),
+			testAccStepEncryptUpsert(t, "test", testPlaintext, decryptData),
+			testAccStepReadPolicy(t, "test", false, false),
+			testAccStepDecrypt(t, "test", testPlaintext, decryptData),
+		},
+	})
+}
+
 func TestBackend_datakey(t *testing.T) {
 	dataKeyInfo := make(map[string]interface{})
 	logicaltest.Test(t, logicaltest.TestCase{
@@ -104,29 +117,6 @@ func TestBackend_rotation(t *testing.T) {
 			testAccStepDecrypt(t, "test", testPlaintext, decryptData),
 			testAccStepRewrap(t, "test", decryptData, 4),
 			testAccStepDecrypt(t, "test", testPlaintext, decryptData),
-			testAccStepEnableDeletion(t, "test"),
-			testAccStepDeletePolicy(t, "test"),
-			testAccStepReadPolicy(t, "test", true, false),
-		},
-	})
-}
-
-func TestBackend_upsert(t *testing.T) {
-	decryptData := make(map[string]interface{})
-	logicaltest.Test(t, logicaltest.TestCase{
-		Factory: Factory,
-		Steps: []logicaltest.TestStep{
-			testAccStepReadPolicy(t, "test", true, false),
-			testAccStepEncryptExpectFailure(t, "test", testPlaintext, decryptData),
-			testAccStepReadPolicy(t, "test", true, false),
-			testAccStepConfigUpsert(t, true),
-			testAccStepEncrypt(t, "test", testPlaintext, decryptData),
-			testAccStepReadPolicy(t, "test", false, false),
-			testAccStepDecrypt(t, "test", testPlaintext, decryptData),
-			testAccStepConfigUpsert(t, false),
-			testAccStepReadPolicy(t, "test2", true, false),
-			testAccStepEncryptExpectFailure(t, "test2", testPlaintext, decryptData),
-			testAccStepReadPolicy(t, "test2", true, false),
 			testAccStepEnableDeletion(t, "test"),
 			testAccStepDeletePolicy(t, "test"),
 			testAccStepReadPolicy(t, "test", true, false),
@@ -291,19 +281,25 @@ func testAccStepEncrypt(
 	}
 }
 
-func testAccStepEncryptExpectFailure(
+func testAccStepEncryptUpsert(
 	t *testing.T, name, plaintext string, decryptData map[string]interface{}) logicaltest.TestStep {
 	return logicaltest.TestStep{
-		Operation: logical.UpdateOperation,
+		Operation: logical.CreateOperation,
 		Path:      "encrypt/" + name,
 		Data: map[string]interface{}{
 			"plaintext": base64.StdEncoding.EncodeToString([]byte(plaintext)),
 		},
-		ErrorOk: true,
 		Check: func(resp *logical.Response) error {
-			if !resp.IsError() {
-				return fmt.Errorf("expected error")
+			var d struct {
+				Ciphertext string `mapstructure:"ciphertext"`
 			}
+			if err := mapstructure.Decode(resp.Data, &d); err != nil {
+				return err
+			}
+			if d.Ciphertext == "" {
+				return fmt.Errorf("missing ciphertext")
+			}
+			decryptData["ciphertext"] = d.Ciphertext
 			return nil
 		},
 	}
@@ -525,16 +521,6 @@ func testAccStepDecryptDatakey(t *testing.T, name string,
 				return fmt.Errorf("plaintext mismatch: got '%s', expected '%s', decryptData was %#v", d.Plaintext, dataKeyInfo["plaintext"].(string))
 			}
 			return nil
-		},
-	}
-}
-
-func testAccStepConfigUpsert(t *testing.T, upsert bool) logicaltest.TestStep {
-	return logicaltest.TestStep{
-		Operation: logical.UpdateOperation,
-		Path:      "config",
-		Data: map[string]interface{}{
-			"allow_upsert": upsert,
 		},
 	}
 }

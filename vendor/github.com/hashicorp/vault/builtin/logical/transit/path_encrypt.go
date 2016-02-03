@@ -30,12 +30,26 @@ func (b *backend) pathEncrypt() *framework.Path {
 		},
 
 		Callbacks: map[logical.Operation]framework.OperationFunc{
+			logical.CreateOperation: b.pathEncryptWrite,
 			logical.UpdateOperation: b.pathEncryptWrite,
 		},
+
+		ExistenceCheck: b.pathEncryptExistenceCheck,
 
 		HelpSynopsis:    pathEncryptHelpSyn,
 		HelpDescription: pathEncryptHelpDesc,
 	}
+}
+
+func (b *backend) pathEncryptExistenceCheck(
+	req *logical.Request, d *framework.FieldData) (bool, error) {
+	name := d.Get("name").(string)
+	lp, err := b.policies.getPolicy(req, name)
+	if err != nil {
+		return false, err
+	}
+
+	return lp != nil, nil
 }
 
 func (b *backend) pathEncryptWrite(
@@ -65,12 +79,7 @@ func (b *backend) pathEncryptWrite(
 
 	// Error if invalid policy
 	if lp == nil {
-		config, err := b.getConfig(req.Storage)
-		if err != nil {
-			return nil, err
-		}
-
-		if config == nil || !config.AllowUpsert {
+		if req.Operation != logical.CreateOperation {
 			return logical.ErrorResponse("policy not found"), logical.ErrInvalidRequest
 		}
 

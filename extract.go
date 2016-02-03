@@ -62,7 +62,7 @@ func serverLogin() (*service.VaultService, error) {
 	}
 
 	// Create service
-	vs, err := service.NewVaultService(globalFlags.VaultServiceConfig)
+	vs, err := service.NewVaultService(log, globalFlags.VaultServiceConfig)
 	if err != nil {
 		return nil, maskAny(err)
 	}
