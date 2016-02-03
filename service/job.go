@@ -16,6 +16,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dchest/uniuri"
 	"github.com/hashicorp/vault/api"
@@ -36,6 +37,8 @@ func (vs *VaultService) Job() *Job {
 
 // Create creates the app-id mapping for a job with given id.
 func (c *Job) Create(jobId, policyName string) error {
+	jobId = strings.ToLower(jobId)
+	policyName = strings.ToLower(policyName)
 	path := fmt.Sprintf("auth/app-id/map/app-id/%s", jobId)
 	data := make(map[string]interface{})
 	data["value"] = policyName
@@ -48,6 +51,7 @@ func (c *Job) Create(jobId, policyName string) error {
 
 // Delete removes the app-id mapping for a job with given id.
 func (c *Job) Delete(jobId string) error {
+	jobId = strings.ToLower(jobId)
 	path := fmt.Sprintf("auth/app-id/map/app-id/%s", jobId)
 	if _, err := c.vaultClient.Logical().Delete(path); err != nil {
 		return maskAny(err)
@@ -59,7 +63,9 @@ func (c *Job) Delete(jobId string) error {
 
 // AddCluster creates the user-id mapping for adding a cluster to a job.
 func (c *Job) AddCluster(jobId, clusterId string) error {
-	userId := uniuri.NewLen(jobUserIdLen)
+	jobId = strings.ToLower(jobId)
+	clusterId = strings.ToLower(clusterId)
+	userId := strings.ToLower(uniuri.NewLen(jobUserIdLen))
 
 	// Create mapping
 	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterId, jobId)
@@ -81,6 +87,8 @@ func (c *Job) AddCluster(jobId, clusterId string) error {
 
 // RemoveCluster removes the user-id mapping for removing a cluster from the list of clusters allowed to run the job.
 func (c *Job) RemoveCluster(jobId, clusterId string) error {
+	jobId = strings.ToLower(jobId)
+	clusterId = strings.ToLower(clusterId)
 	// Read the user id
 	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterId, jobId)
 	userIdSecret, err := c.vaultClient.Logical().Read(userIdPath)

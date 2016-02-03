@@ -42,10 +42,13 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	if err != nil {
 		return maskAny(err)
 	}
+	clusterID = strings.ToLower(clusterID)
 	machineID, err := readID(data.MachineIDPath)
 	if err != nil {
 		return maskAny(err)
 	}
+	machineID = strings.ToLower(machineID)
+	jobID := strings.ToLower(data.JobID)
 
 	// Perform step 1 login
 	s.log.Debug("Step 1 login")
@@ -65,7 +68,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 
 	// Read cluster/job specific user-id
 	s.log.Debug("Fetch cluster+job specific user-id")
-	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterID, data.JobID)
+	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterID, jobID)
 	userIdSecret, err := logical.Read(userIdPath)
 	if err != nil {
 		s.vaultClient.ClearToken()
@@ -82,7 +85,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	s.log.Debug("Step 2 login")
 	s.vaultClient.ClearToken()
 	step2Data := make(map[string]interface{})
-	step2Data["app_id"] = data.JobID
+	step2Data["app_id"] = jobID
 	step2Data["user_id"] = userId
 	if loginSecret, err := logical.Write("auth/app-id/login", step2Data); err != nil {
 		return maskAny(err)

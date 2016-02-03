@@ -16,6 +16,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/vault/api"
 )
@@ -39,6 +40,7 @@ func (vs *VaultService) Cluster() *Cluster {
 // Create creates the app-id mapping for a cluster with given id.
 // It also creates and uses a policy for accessing only the jobs within the cluster.
 func (c *Cluster) Create(clusterId string) error {
+	clusterId = strings.ToLower(clusterId)
 	policyName, err := c.createClusterPolicy(clusterId)
 	if err != nil {
 		return maskAny(err)
@@ -56,6 +58,7 @@ func (c *Cluster) Create(clusterId string) error {
 // Delete removes the app-id mapping for a cluster with given id.
 // It also removes the policy for accessing only the jobs within the cluster.
 func (c *Cluster) Delete(clusterId string) error {
+	clusterId = strings.ToLower(clusterId)
 	path := fmt.Sprintf("auth/app-id/map/app-id/%s", clusterId)
 	if _, err := c.vaultClient.Logical().Delete(path); err != nil {
 		return maskAny(err)
@@ -71,6 +74,8 @@ func (c *Cluster) Delete(clusterId string) error {
 
 // AddMachine creates the user-id mapping for adding a machine to a cluster.
 func (c *Cluster) AddMachine(clusterId, machineId, cidrBlock string) error {
+	clusterId = strings.ToLower(clusterId)
+	machineId = strings.ToLower(machineId)
 	path := fmt.Sprintf("auth/app-id/map/user-id/%s", machineId)
 	data := make(map[string]interface{})
 	data["value"] = clusterId
@@ -85,6 +90,7 @@ func (c *Cluster) AddMachine(clusterId, machineId, cidrBlock string) error {
 
 // RemoveMachine removes the user-id mapping for removing a machine from a cluster.
 func (c *Cluster) RemoveMachine(machineId string) error {
+	machineId = strings.ToLower(machineId)
 	path := fmt.Sprintf("auth/app-id/map/user-id/%s", machineId)
 	if _, err := c.vaultClient.Logical().Delete(path); err != nil {
 		return maskAny(err)
@@ -96,6 +102,7 @@ func (c *Cluster) RemoveMachine(machineId string) error {
 // cluster-auth data of the first step of the server authentication.
 // It returns the policy name and any error.
 func (c *Cluster) createClusterPolicy(clusterId string) (string, error) {
+	clusterId = strings.ToLower(clusterId)
 	policy := fmt.Sprintf(clusterPolicyTmpl, clusterAuthPathPrefix+clusterId)
 	policyName := fmt.Sprintf(clusterPolicyNameTmpl, clusterId)
 	if err := c.vaultClient.Sys().PutPolicy(policyName, policy); err != nil {
