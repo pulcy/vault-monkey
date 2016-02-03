@@ -66,6 +66,7 @@ $(BIN): $(GOBUILDDIR) $(SOURCES)
 	    -e GOPATH=/usr/code/.gobuild \
 	    -e GOOS=$(GOOS) \
 	    -e GOARCH=$(GOARCH) \
+		-e CGO_ENABLED=0 \
 	    -w /usr/code/ \
 	    golang:$(GOVERSION) \
-	    go build -a -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT) $(REPOPATH)
+	    go build -a -installsuffix netgo -tags netgo -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT) $(REPOPATH)
