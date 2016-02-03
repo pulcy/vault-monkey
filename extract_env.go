@@ -38,6 +38,7 @@ func init() {
 
 func cmdExtractEnvRun(cmd *cobra.Command, args []string) {
 	// Check arguments
+	assertArgIsSet(extractFlags.targetFilePath, "--target")
 	if len(args) == 0 {
 		Exitf("Private at least one argument: <key>=<path>[#field]")
 	}
