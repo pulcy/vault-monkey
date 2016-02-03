@@ -19,7 +19,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -41,7 +40,7 @@ func (s *VaultService) CreateEnvironmentFile(path string, secrets []EnvSecret) e
 		if err != nil {
 			return maskAny(err)
 		}
-		line := fmt.Sprintf("%s=%s", envSec.EnvironmentKey, strconv.Quote(value))
+		line := fmt.Sprintf("%s=%s", envSec.EnvironmentKey, value)
 		lines = append(lines, line)
 	}
 	content := strings.Join(lines, "\n")
