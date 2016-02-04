@@ -162,11 +162,19 @@ them to file.
 
 ### Security notes
 
+#### Note 1
+
 It may be possible that a machine stores the `user-id` it fetches in step 1 longer than it should.
 In that case this machine will be able to access secrets for the configured jobs even after it has been
 removed from the cluster.
 
 If that is the case, replace the `user-id` by running `vault-monkey job allow ...` again.
+
+#### Note 2
+
+The primary use of vault-monkey is to extract secrets from the vault.
+This will result in files in your filesystem. To make sure these secrets do not survive a reboot,
+use a directory that is mounted on non-persistent storage.
 
 ## Vault policies
 
@@ -204,3 +212,5 @@ To build vault-monkey, run:
 ```
 make
 ```
+
+This will setup a local `GOPATH` and run a docker container to build vault-monkey.
