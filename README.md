@@ -25,8 +25,8 @@ Example:
 This command results in a file in `/tmp/mysecrets` containing:
 
 ```
-KEY1="content of 'myfield' field under '/secret/somekey' path"
-KEY2="content of 'value' field under '/secret/otherkey' path"
+KEY1=content of 'myfield' field under '/secret/somekey' path
+KEY2=content of 'value' field under '/secret/otherkey' path
 ```
 
 #### Extract a secret as a file
