@@ -61,8 +61,8 @@ func (c *Job) Delete(jobId string) error {
 	return nil
 }
 
-// AddCluster creates the user-id mapping for adding a cluster to a job.
-func (c *Job) AddCluster(jobId, clusterId string) error {
+// AllowCluster creates the user-id mapping for allowing a cluster access to the secrets of a job.
+func (c *Job) AllowCluster(jobId, clusterId string) error {
 	jobId = strings.ToLower(jobId)
 	clusterId = strings.ToLower(clusterId)
 	userId := strings.ToLower(uniuri.NewLen(jobUserIdLen))
@@ -85,8 +85,8 @@ func (c *Job) AddCluster(jobId, clusterId string) error {
 	return nil
 }
 
-// RemoveCluster removes the user-id mapping for removing a cluster from the list of clusters allowed to run the job.
-func (c *Job) RemoveCluster(jobId, clusterId string) error {
+// DenyCluster removes the user-id mapping so the cluster is denied access to the secrets of a job.
+func (c *Job) DenyCluster(jobId, clusterId string) error {
 	jobId = strings.ToLower(jobId)
 	clusterId = strings.ToLower(clusterId)
 	// Read the user id

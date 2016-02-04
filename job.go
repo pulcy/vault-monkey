@@ -37,16 +37,16 @@ var (
 		Run:   cmdJobDeleteRun,
 	}
 
-	cmdJobAddCluster = &cobra.Command{
-		Use:   "add",
-		Short: "Add a cluster to a job",
-		Run:   cmdJobAddClusterRun,
+	cmdJobAllowCluster = &cobra.Command{
+		Use:   "allow",
+		Short: "Allow a cluster to access secrets for a job",
+		Run:   cmdJobAllowClusterRun,
 	}
 
-	cmdJobRemoveCluster = &cobra.Command{
-		Use:   "remove",
-		Short: "Remove a cluster from a job",
-		Run:   cmdJobRemoveClusterRun,
+	cmdJobDenyCluster = &cobra.Command{
+		Use:   "deny",
+		Short: "Deny a cluster to access secrets for a job",
+		Run:   cmdJobDenyClusterRun,
 	}
 
 	jobFlags struct {
@@ -59,8 +59,8 @@ var (
 func init() {
 	cmdJob.AddCommand(cmdJobCreate)
 	cmdJob.AddCommand(cmdJobDelete)
-	cmdJob.AddCommand(cmdJobAddCluster)
-	cmdJob.AddCommand(cmdJobRemoveCluster)
+	cmdJob.AddCommand(cmdJobAllowCluster)
+	cmdJob.AddCommand(cmdJobDenyCluster)
 
 	cmdJob.PersistentFlags().StringVarP(&jobFlags.jobID, "job-id", "j", "", "ID of the job")
 	cmdJob.PersistentFlags().StringVarP(&jobFlags.clusterID, "cluster-id", "c", "", "ID of the cluster")
@@ -95,7 +95,7 @@ func cmdJobDeleteRun(cmd *cobra.Command, args []string) {
 	}
 }
 
-func cmdJobAddClusterRun(cmd *cobra.Command, args []string) {
+func cmdJobAllowClusterRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(jobFlags.jobID, "job-id")
 	assertArgIsSet(jobFlags.clusterID, "cluster-id")
 
@@ -104,12 +104,12 @@ func cmdJobAddClusterRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Job().AddCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
-		Exitf("Failed to add cluster to job: %v", err)
+	if err := vs.Job().AllowCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
+		Exitf("Failed to allow cluster to access secrets of a job: %v", err)
 	}
 }
 
-func cmdJobRemoveClusterRun(cmd *cobra.Command, args []string) {
+func cmdJobDenyClusterRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(jobFlags.jobID, "job-id")
 	assertArgIsSet(jobFlags.clusterID, "cluster-id")
 
@@ -118,7 +118,7 @@ func cmdJobRemoveClusterRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Job().RemoveCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
-		Exitf("Failed to remove cluster from job: %v", err)
+	if err := vs.Job().DenyCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
+		Exitf("Failed to deny cluster access to secrets of a job: %v", err)
 	}
 }
