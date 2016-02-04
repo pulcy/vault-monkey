@@ -108,7 +108,7 @@ The script to fetch an unseal key will be executed several times (how many depen
 The arguments of the script will be processed as a go template with `{{.Key}}` as the number of the key
 to extract. This value can be 1..N where N is the unseal threshold.
 
-E.g. if you use `pass` to store your unseal keys, use something like this:
+E.g. if you use [`pass`](http://www.passwordstore.org/) to store your unseal keys, use something like this:
 
 ```
 vault-monkey unseal -G <github-token> pass show MyVault/UnsealKey{{.Key}}
