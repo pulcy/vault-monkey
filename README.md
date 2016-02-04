@@ -8,7 +8,7 @@ formatted into an environment file.
 
 All extract functions use a 2 step server login, that is designed to simplify management of
 large clusters of machines, where access policies are organized per cluster-job pair
-instead of machine-job pair. See [authentication scheme](#Authentication Scheme).
+instead of machine-job pair. See [authentication scheme](#authentication-scheme).
 
 ## Usage
 
@@ -179,7 +179,7 @@ use a directory that is mounted on non-persistent storage.
 ## Vault policies
 
 Vault-monkey will automatically create a policy for step 1 of the authentication.
-To allow your operations team to execute all the [operational commands](#Operational commands)
+To allow your operations team to execute all the [operational commands](#operational-commands)
 use a policy like this:
 
 ```
