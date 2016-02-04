@@ -31,7 +31,7 @@ KEY2=content of 'value' field under '/secret/otherkey' path
 
 #### Extract a secret as a file
 
-`vault-monkey extract file --target <environment-file-path> <path>[#<field]`
+`vault-monkey extract file --target <file-path> <path>[#<field]`
 
 Example:
 
