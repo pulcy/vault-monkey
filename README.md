@@ -1,11 +1,20 @@
 # Vault-monkey
 
 Vault-monkey is an application that extracts secrets from a [vault](https://vaultproject.io).
-It is designed to be used in a micro-service environment running autonomously.
+It is designed to be used in a micro-service environment, running autonomously.
+
+Vault-monkey formats the extracted secrets as individual files, or as key-value pairs
+formatted into an environment file.
+
+All extract functions use a 2 step server login, that is designed to simplify management of
+large clusters of machines, where access policies are organized per cluster-job pair
+instead of machine-job pair. See [authentication scheme](#Authentication Scheme).
 
 ## Usage
 
-### Extract one or more secrets as environment variables
+### Extracting secrets
+
+#### Extract one or more secrets as environment variables
 
 `vault-monkey extract env --target <environment-file-path> <key>=<path>[#<field]...`
 
@@ -20,7 +29,7 @@ KEY1="content of 'myfield' field under '/secret/somekey' path"
 KEY2="content of 'value' field under '/secret/otherkey' path"
 ```
 
-### Extract a secret as a file
+#### Extract a secret as a file
 
 `vault-monkey extract file --target <environment-file-path> <path>[#<field]`
 
@@ -31,13 +40,83 @@ Example:
 This command results in a file in `/tmp/myfile` containing the content
 of the 'myfield' under '/secret/somekey' path.
 
-## Building
 
-Run:
+### Operational commands
+
+Operations can use vault-monkey to prepare the vault for the 2 step authentication using several
+`cluster` and `job` commands.
+
+To create a new cluster, use:
 
 ```
-make
+vault-monkey cluster create -G <github-token> --cluster-id <cluster-id>
 ```
+
+This will automatically create a policy needed for step 1 of the authentication scheme.
+
+To add a machine to a cluster, use:
+
+```
+vault-monkey cluster add -G <github-token> --cluster-id <cluster-id> --machine-id <machine-id>
+```
+
+To remove a machine from a cluster, use:
+
+```
+vault-monkey cluster remove -G <github-token> --cluster-id <cluster-id> --machine-id <machine-id>
+```
+
+To create a new job, use:
+
+```
+vault-monkey job create -G <github-token> --job-id <cluster-id> --policy <policy-name>
+```
+
+To allow a cluster to access secrets for a job, use:
+
+```
+vault-monkey job allow -G <github-token> --job-id <job-id> --cluster-id <cluster-id>
+```
+
+To deny a cluster to access secrets for a job, use:
+
+```
+vault-monkey job deny -G <github-token> --job-id <job-id> --cluster-id <cluster-id>
+```
+
+To remove a job, use:
+
+```
+vault-monkey job delete -G <github-token> --job-id <cluster-id>
+```
+
+Note that deleting a job does not remove all cluster grants.
+
+To seal a vault, use:
+
+```
+vault-monkey seal -G <github-token>
+```
+
+To unseal a vault, use:
+
+```
+vault-monkey unseal -G <github-token> <script-to-fetch-a-key> [script argument]...
+```
+
+The script to fetch an unseal key will be executed several times (how many depends on the unseal threshold).
+The arguments of the script will be processed as a go template with `{{.Key}}` as the number of the key
+to extract. This value can be 1..N where N is the unseal threshold.
+
+E.g. if you use `pass` to store your unseal keys, use something like this:
+
+```
+vault-monkey unseal -G <github-token> pass show MyVault/UnsealKey{{.Key}}
+```
+
+This will fetch keys from your password-store with path `MyVaultUnsealKey1`, `MyVaultUnsealKey2` etc.
+Note that vault-monkey will shuffle the keys, so if your vault has 5 unseal keys with a threshold of 3
+if may ask for key3, key1, key5.
 
 ## Authentication Scheme
 
@@ -80,3 +159,48 @@ using this user-id combined with the job-id (as app-id).
 
 With the token obtained from this second login, vault-monkey will fetch the intended secrets and write
 them to file.
+
+### Security notes
+
+It may be possible that a machine stores the `user-id` it fetches in step 1 longer than it should.
+In that case this machine will be able to access secrets for the configured jobs even after it has been
+removed from the cluster.
+
+If that is the case, replace the `user-id` by running `vault-monkey job allow ...` again.
+
+## Vault policies
+
+Vault-monkey will automatically create a policy for step 1 of the authentication.
+To allow your operations team to execute all the [operational commands](#Operational commands)
+use a policy like this:
+
+```
+// Allow operations to seal the vault
+path "sys/seal" {
+    policy = "sudo"
+}
+
+// Allow operations to configure app-id's
+path "auth/app-id/*" {
+    policy = "write"
+}
+
+// Allow operations to create 2 step cluster authentication policies
+path "sys/policy/cluster_auth_*" {
+    policy = "write"
+}
+
+// Allow operations to access all normal secrets
+// This is not needed for vault-monkey, but it likely to be convenient.
+path "secret/*" {
+    policy = "write"
+}
+```
+
+## Building
+
+To build vault-monkey, run:
+
+```
+make
+```
