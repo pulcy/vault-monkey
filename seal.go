@@ -15,24 +15,27 @@
 package main
 
 import (
-	"git.pulcy.com/pulcy/vault-monkey/service"
+	"github.com/spf13/cobra"
 )
 
-// adminLogin initialized a VaultServices and tries to perform a administrator login (if needed).
-func adminLogin() (*service.VaultService, error) {
-	assertArgIsSet(globalFlags.githubToken, "-G")
-	// Create service
-	vs, err := service.NewVaultService(log, globalFlags.VaultServiceConfig)
+var (
+	cmdSeal = &cobra.Command{
+		Use:   "seal",
+		Short: "Seal the vault.",
+		Run:   cmdSealRun,
+	}
+)
+
+func init() {
+	cmdMain.AddCommand(cmdSeal)
+}
+
+func cmdSealRun(cmd *cobra.Command, args []string) {
+	vs, err := adminLogin()
 	if err != nil {
-		return nil, maskAny(err)
+		Exitf("Failed to create vault service: %#v", err)
 	}
-
-	// Login with github (if available)
-	if err := vs.GithubLogin(service.GithubLoginData{
-		GithubToken: globalFlags.githubToken,
-	}); err != nil {
-		return nil, maskAny(err)
+	if err := vs.Seal(); err != nil {
+		Exitf("Failed to seal vault: %#v", err)
 	}
-
-	return vs, nil
 }

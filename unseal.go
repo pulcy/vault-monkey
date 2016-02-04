@@ -15,24 +15,34 @@
 package main
 
 import (
+	"github.com/spf13/cobra"
+
 	"git.pulcy.com/pulcy/vault-monkey/service"
 )
 
-// adminLogin initialized a VaultServices and tries to perform a administrator login (if needed).
-func adminLogin() (*service.VaultService, error) {
-	assertArgIsSet(globalFlags.githubToken, "-G")
+var (
+	cmdUnseal = &cobra.Command{
+		Use:     "unseal",
+		Short:   "Unseal the vault.",
+		Example: "vault-monkey unseal pass show /MyVault/UnsealKey{{.Key}}",
+		Run:     cmdUnsealRun,
+	}
+)
+
+func init() {
+	cmdMain.AddCommand(cmdUnseal)
+}
+
+func cmdUnsealRun(cmd *cobra.Command, args []string) {
+	if len(args) == 0 {
+		Exitf("Pass command to query for unseal keys.")
+	}
 	// Create service
 	vs, err := service.NewVaultService(log, globalFlags.VaultServiceConfig)
 	if err != nil {
-		return nil, maskAny(err)
+		Exitf("Failed to create vault service: %#v", err)
 	}
-
-	// Login with github (if available)
-	if err := vs.GithubLogin(service.GithubLoginData{
-		GithubToken: globalFlags.githubToken,
-	}); err != nil {
-		return nil, maskAny(err)
+	if err := vs.Unseal(args); err != nil {
+		Exitf("Failed to unseal vault: %#v", err)
 	}
-
-	return vs, nil
 }
