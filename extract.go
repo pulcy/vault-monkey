@@ -19,7 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"git.pulcy.com/pulcy/vault-monkey/service"
+	"github.com/pulcy/vault-monkey/service"
 )
 
 const (
