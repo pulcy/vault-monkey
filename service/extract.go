@@ -29,7 +29,7 @@ func (s *VaultService) extractSecret(secretPath, secretField string) (string, er
 	}
 
 	// Load secret
-	s.log.Debug("Read %s#%s", secretPath, secretField)
+	s.log.Info("Read %s#%s", secretPath, secretField)
 	secret, err := s.vaultClient.Logical().Read(secretPath)
 	if err != nil {
 		return "", maskAny(errgo.WithCausef(nil, VaultError, "error reading %s: %s", secretPath, err))
