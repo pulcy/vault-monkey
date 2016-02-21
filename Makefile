@@ -17,7 +17,7 @@ REPOPATH := $(ORGPATH)/$(REPONAME)
 BIN := $(BINDIR)/$(PROJECT)
 
 GOPATH := $(GOBUILDDIR)
-GOVERSION := 1.5.3
+GOVERSION := 1.6.0-alpine
 
 ifndef GOOS
 	GOOS := linux
@@ -61,13 +61,12 @@ update-vendor:
 
 $(BIN): $(GOBUILDDIR) $(SOURCES)
 	docker run \
-	    --rm \
-	    -v $(ROOTDIR):/usr/code \
-	    -e GO15VENDOREXPERIMENT=1 \
-	    -e GOPATH=/usr/code/.gobuild \
-	    -e GOOS=$(GOOS) \
-	    -e GOARCH=$(GOARCH) \
+		--rm \
+		-v $(ROOTDIR):/usr/code \
+		-e GOPATH=/usr/code/.gobuild \
+		-e GOOS=$(GOOS) \
+		-e GOARCH=$(GOARCH) \
 		-e CGO_ENABLED=0 \
-	    -w /usr/code/ \
-	    golang:$(GOVERSION) \
-	    go build -a -installsuffix netgo -tags netgo -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT) $(REPOPATH)
+		-w /usr/code/ \
+		golang:$(GOVERSION) \
+		go build -a -installsuffix netgo -tags netgo -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT) $(REPOPATH)
