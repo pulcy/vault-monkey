@@ -76,7 +76,11 @@ func cmdClusterCreateRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Cluster().Create(clusterFlags.clusterID); err != nil {
+	cluster, err := vs.Cluster()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := cluster.Create(clusterFlags.clusterID); err != nil {
 		Exitf("Failed to create cluster: %v", err)
 	}
 }
@@ -89,7 +93,11 @@ func cmdClusterDeleteRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Cluster().Delete(clusterFlags.clusterID); err != nil {
+	cluster, err := vs.Cluster()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := cluster.Delete(clusterFlags.clusterID); err != nil {
 		Exitf("Failed to create cluster: %v", err)
 	}
 }
@@ -103,7 +111,11 @@ func cmdClusterAddMachineRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Cluster().AddMachine(clusterFlags.clusterID, clusterFlags.machineID, clusterFlags.cidrBlock); err != nil {
+	cluster, err := vs.Cluster()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := cluster.AddMachine(clusterFlags.clusterID, clusterFlags.machineID, clusterFlags.cidrBlock); err != nil {
 		Exitf("Failed to add machine to cluster: %v", err)
 	}
 }
@@ -116,7 +128,11 @@ func cmdClusterRemoveMachineRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Cluster().RemoveMachine(clusterFlags.machineID); err != nil {
+	cluster, err := vs.Cluster()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := cluster.RemoveMachine(clusterFlags.machineID); err != nil {
 		Exitf("Failed to remove machine from cluster: %v", err)
 	}
 }

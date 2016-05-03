@@ -14,8 +14,7 @@ var (
 	// protectedPaths cannot be accessed via the raw APIs.
 	// This is both for security and to prevent disrupting Vault.
 	protectedPaths = []string{
-		barrierInitPath,
-		keyringPath,
+		"core",
 	}
 )
 
@@ -41,17 +40,109 @@ func NewSystemBackend(core *Core, config *logical.BackendConfig) logical.Backend
 
 		Paths: []*framework.Path{
 			&framework.Path{
+				Pattern: "capabilities-accessor$",
+
+				Fields: map[string]*framework.FieldSchema{
+					"accessor": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: "Accessor of the token for which capabilities are being queried.",
+					},
+					"path": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: "Path on which capabilities are being queried.",
+					},
+				},
+
+				Callbacks: map[logical.Operation]framework.OperationFunc{
+					logical.UpdateOperation: b.handleCapabilitiesAccessor,
+				},
+
+				HelpSynopsis:    strings.TrimSpace(sysHelp["capabilities_accessor"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["capabilities_accessor"][1]),
+			},
+
+			&framework.Path{
+				Pattern: "capabilities$",
+
+				Fields: map[string]*framework.FieldSchema{
+					"token": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: "Token for which capabilities are being queried.",
+					},
+					"path": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: "Path on which capabilities are being queried.",
+					},
+				},
+
+				Callbacks: map[logical.Operation]framework.OperationFunc{
+					logical.UpdateOperation: b.handleCapabilities,
+				},
+
+				HelpSynopsis:    strings.TrimSpace(sysHelp["capabilities"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["capabilities"][1]),
+			},
+
+			&framework.Path{
+				Pattern: "capabilities-self$",
+
+				Fields: map[string]*framework.FieldSchema{
+					"token": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: "Token for which capabilities are being queried.",
+					},
+					"path": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: "Path on which capabilities are being queried.",
+					},
+				},
+
+				Callbacks: map[logical.Operation]framework.OperationFunc{
+					logical.UpdateOperation: b.handleCapabilities,
+				},
+
+				HelpSynopsis:    strings.TrimSpace(sysHelp["capabilities_self"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["capabilities_self"][1]),
+			},
+
+			&framework.Path{
+				Pattern:         "generate-root(/attempt)?$",
+				HelpSynopsis:    strings.TrimSpace(sysHelp["generate-root"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["generate-root"][1]),
+			},
+
+			&framework.Path{
+				Pattern:         "init$",
+				HelpSynopsis:    strings.TrimSpace(sysHelp["init"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["init"][1]),
+			},
+
+			&framework.Path{
 				Pattern: "rekey/backup$",
 
 				Fields: map[string]*framework.FieldSchema{},
 
 				Callbacks: map[logical.Operation]framework.OperationFunc{
-					logical.ReadOperation:   b.handleRekeyRetrieve,
-					logical.DeleteOperation: b.handleRekeyDelete,
+					logical.ReadOperation:   b.handleRekeyRetrieveBarrier,
+					logical.DeleteOperation: b.handleRekeyDeleteBarrier,
 				},
 
-				HelpSynopsis:    strings.TrimSpace(sysHelp["mount_tune"][0]),
-				HelpDescription: strings.TrimSpace(sysHelp["mount_tune"][1]),
+				HelpSynopsis:    strings.TrimSpace(sysHelp["rekey_backup"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["rekey_backup"][0]),
+			},
+
+			&framework.Path{
+				Pattern: "rekey/recovery-key-backup$",
+
+				Fields: map[string]*framework.FieldSchema{},
+
+				Callbacks: map[logical.Operation]framework.OperationFunc{
+					logical.ReadOperation:   b.handleRekeyRetrieveRecovery,
+					logical.DeleteOperation: b.handleRekeyDeleteRecovery,
+				},
+
+				HelpSynopsis:    strings.TrimSpace(sysHelp["rekey_backup"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["rekey_backup"][0]),
 			},
 
 			&framework.Path{
@@ -129,11 +220,11 @@ func NewSystemBackend(core *Core, config *logical.BackendConfig) logical.Backend
 				Fields: map[string]*framework.FieldSchema{
 					"from": &framework.FieldSchema{
 						Type:        framework.TypeString,
-						Description: strings.TrimSpace(sysHelp["remount_from"][0]),
+						Description: "The previous mount point.",
 					},
 					"to": &framework.FieldSchema{
 						Type:        framework.TypeString,
-						Description: strings.TrimSpace(sysHelp["remount_to"][0]),
+						Description: "The new mount point.",
 					},
 				},
 
@@ -183,6 +274,24 @@ func NewSystemBackend(core *Core, config *logical.BackendConfig) logical.Backend
 
 				HelpSynopsis:    strings.TrimSpace(sysHelp["revoke"][0]),
 				HelpDescription: strings.TrimSpace(sysHelp["revoke"][1]),
+			},
+
+			&framework.Path{
+				Pattern: "revoke-force/(?P<prefix>.+)",
+
+				Fields: map[string]*framework.FieldSchema{
+					"prefix": &framework.FieldSchema{
+						Type:        framework.TypeString,
+						Description: strings.TrimSpace(sysHelp["revoke-force-path"][0]),
+					},
+				},
+
+				Callbacks: map[logical.Operation]framework.OperationFunc{
+					logical.UpdateOperation: b.handleRevokeForce,
+				},
+
+				HelpSynopsis:    strings.TrimSpace(sysHelp["revoke-force"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["revoke-force"][1]),
 			},
 
 			&framework.Path{
@@ -246,6 +355,7 @@ func NewSystemBackend(core *Core, config *logical.BackendConfig) logical.Backend
 
 				Callbacks: map[logical.Operation]framework.OperationFunc{
 					logical.ReadOperation: b.handlePolicyList,
+					logical.ListOperation: b.handlePolicyList,
 				},
 
 				HelpSynopsis:    strings.TrimSpace(sysHelp["policy-list"][0]),
@@ -274,6 +384,24 @@ func NewSystemBackend(core *Core, config *logical.BackendConfig) logical.Backend
 
 				HelpSynopsis:    strings.TrimSpace(sysHelp["policy"][0]),
 				HelpDescription: strings.TrimSpace(sysHelp["policy"][1]),
+			},
+
+			&framework.Path{
+				Pattern:         "seal-status$",
+				HelpSynopsis:    strings.TrimSpace(sysHelp["seal-status"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["seal-status"][1]),
+			},
+
+			&framework.Path{
+				Pattern:         "seal$",
+				HelpSynopsis:    strings.TrimSpace(sysHelp["seal"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["seal"][1]),
+			},
+
+			&framework.Path{
+				Pattern:         "unseal$",
+				HelpSynopsis:    strings.TrimSpace(sysHelp["unseal"][0]),
+				HelpDescription: strings.TrimSpace(sysHelp["unseal"][1]),
 			},
 
 			&framework.Path{
@@ -396,11 +524,52 @@ type SystemBackend struct {
 	Backend *framework.Backend
 }
 
+// handleCapabilitiesreturns the ACL capabilities of the token for a given path
+func (b *SystemBackend) handleCapabilities(req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	capabilities, err := b.Core.Capabilities(d.Get("token").(string), d.Get("path").(string))
+	if err != nil {
+		return nil, err
+	}
+
+	return &logical.Response{
+		Data: map[string]interface{}{
+			"capabilities": capabilities,
+		},
+	}, nil
+}
+
+// handleCapabilitiesAccessor returns the ACL capabilities of the token associted
+// with the given accessor for a given path.
+func (b *SystemBackend) handleCapabilitiesAccessor(req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	accessor := d.Get("accessor").(string)
+	if accessor == "" {
+		return logical.ErrorResponse("missing accessor"), nil
+	}
+
+	token, err := b.Core.tokenStore.lookupByAccessor(accessor)
+	if err != nil {
+		return nil, err
+	}
+
+	capabilities, err := b.Core.Capabilities(token, d.Get("path").(string))
+	if err != nil {
+		return nil, err
+	}
+
+	return &logical.Response{
+		Data: map[string]interface{}{
+			"capabilities": capabilities,
+		},
+	}, nil
+}
+
 // handleRekeyRetrieve returns backed-up, PGP-encrypted unseal keys from a
 // rekey operation
 func (b *SystemBackend) handleRekeyRetrieve(
-	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
-	backup, err := b.Core.RekeyRetrieveBackup()
+	req *logical.Request,
+	data *framework.FieldData,
+	recovery bool) (*logical.Response, error) {
+	backup, err := b.Core.RekeyRetrieveBackup(recovery)
 	if err != nil {
 		return nil, fmt.Errorf("unable to look up backed-up keys: %v", err)
 	}
@@ -419,16 +588,37 @@ func (b *SystemBackend) handleRekeyRetrieve(
 	return resp, nil
 }
 
+func (b *SystemBackend) handleRekeyRetrieveBarrier(
+	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	return b.handleRekeyRetrieve(req, data, false)
+}
+
+func (b *SystemBackend) handleRekeyRetrieveRecovery(
+	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	return b.handleRekeyRetrieve(req, data, true)
+}
+
 // handleRekeyDelete deletes backed-up, PGP-encrypted unseal keys from a rekey
 // operation
 func (b *SystemBackend) handleRekeyDelete(
-	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
-	err := b.Core.RekeyDeleteBackup()
+	req *logical.Request,
+	data *framework.FieldData,
+	recovery bool) (*logical.Response, error) {
+	err := b.Core.RekeyDeleteBackup(recovery)
 	if err != nil {
 		return nil, fmt.Errorf("error during deletion of backed-up keys: %v", err)
 	}
 
 	return nil, nil
+}
+func (b *SystemBackend) handleRekeyDeleteBarrier(
+	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	return b.handleRekeyDelete(req, data, false)
+}
+
+func (b *SystemBackend) handleRekeyDeleteRecovery(
+	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	return b.handleRekeyDelete(req, data, true)
 }
 
 // handleMountTable handles the "mounts" endpoint to provide the mount table
@@ -464,6 +654,8 @@ func (b *SystemBackend) handleMount(
 	path := data.Get("path").(string)
 	logicalType := data.Get("type").(string)
 	description := data.Get("description").(string)
+
+	path = sanitizeMountPath(path)
 
 	var config MountConfig
 
@@ -561,6 +753,8 @@ func (b *SystemBackend) handleUnmount(
 		return logical.ErrorResponse("path cannot be blank"), logical.ErrInvalidRequest
 	}
 
+	suffix = sanitizeMountPath(suffix)
+
 	// Attempt unmount
 	if err := b.Core.unmount(suffix); err != nil {
 		b.Backend.Logger().Printf("[ERR] sys: unmount '%s' failed: %v", suffix, err)
@@ -582,6 +776,9 @@ func (b *SystemBackend) handleRemount(
 			logical.ErrInvalidRequest
 	}
 
+	fromPath = sanitizeMountPath(fromPath)
+	toPath = sanitizeMountPath(toPath)
+
 	// Attempt remount
 	if err := b.Core.remount(fromPath, toPath); err != nil {
 		b.Backend.Logger().Printf("[ERR] sys: remount '%s' to '%s' failed: %v", fromPath, toPath, err)
@@ -601,9 +798,7 @@ func (b *SystemBackend) handleMountTuneRead(
 			logical.ErrInvalidRequest
 	}
 
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
+	path = sanitizeMountPath(path)
 
 	sysView := b.Core.router.MatchingSystemView(path)
 	if sysView == nil {
@@ -632,9 +827,7 @@ func (b *SystemBackend) handleMountTuneWrite(
 			logical.ErrInvalidRequest
 	}
 
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
+	path = sanitizeMountPath(path)
 
 	// Prevent protected paths from being changed
 	for _, p := range untunableMounts {
@@ -732,11 +925,29 @@ func (b *SystemBackend) handleRevoke(
 // handleRevokePrefix is used to revoke a prefix with many LeaseIDs
 func (b *SystemBackend) handleRevokePrefix(
 	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	return b.handleRevokePrefixCommon(req, data, false)
+}
+
+// handleRevokeForce is used to revoke a prefix with many LeaseIDs, ignoring errors
+func (b *SystemBackend) handleRevokeForce(
+	req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	return b.handleRevokePrefixCommon(req, data, true)
+}
+
+// handleRevokePrefixCommon is used to revoke a prefix with many LeaseIDs
+func (b *SystemBackend) handleRevokePrefixCommon(
+	req *logical.Request, data *framework.FieldData, force bool) (*logical.Response, error) {
 	// Get all the options
 	prefix := data.Get("prefix").(string)
 
 	// Invoke the expiration manager directly
-	if err := b.Core.expiration.RevokePrefix(prefix); err != nil {
+	var err error
+	if force {
+		err = b.Core.expiration.RevokeForce(prefix)
+	} else {
+		err = b.Core.expiration.RevokePrefix(prefix)
+	}
+	if err != nil {
 		b.Backend.Logger().Printf("[ERR] sys: revoke prefix '%s' failed: %v", prefix, err)
 		return handleError(err)
 	}
@@ -776,6 +987,8 @@ func (b *SystemBackend) handleEnableAuth(
 			logical.ErrInvalidRequest
 	}
 
+	path = sanitizeMountPath(path)
+
 	// Create the mount entry
 	me := &MountEntry{
 		Path:        path,
@@ -799,6 +1012,8 @@ func (b *SystemBackend) handleDisableAuth(
 		return logical.ErrorResponse("path cannot be blank"), logical.ErrInvalidRequest
 	}
 
+	suffix = sanitizeMountPath(suffix)
+
 	// Attempt disable
 	if err := b.Core.disableCredential(suffix); err != nil {
 		b.Backend.Logger().Printf("[ERR] sys: disable auth '%s' failed: %v", suffix, err)
@@ -815,7 +1030,12 @@ func (b *SystemBackend) handlePolicyList(
 
 	// Add the special "root" policy
 	policies = append(policies, "root")
-	return logical.ListResponse(policies), err
+	resp := logical.ListResponse(policies)
+
+	// Backwords compatibility
+	resp.Data["policies"] = resp.Data["keys"]
+
+	return resp, err
 }
 
 // handlePolicyRead handles the "policy/<name>" endpoint to read a policy
@@ -883,6 +1103,7 @@ func (b *SystemBackend) handleAuditTable(
 	}
 	for _, entry := range b.Core.audit.Entries {
 		info := map[string]interface{}{
+			"path":        entry.Path,
 			"type":        entry.Type,
 			"description": entry.Description,
 			"options":     entry.Options,
@@ -902,9 +1123,7 @@ func (b *SystemBackend) handleAuditHash(
 		return logical.ErrorResponse("the \"input\" parameter is empty"), nil
 	}
 
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
+	path = sanitizeMountPath(path)
 
 	hash, err := b.Core.auditBroker.GetHash(path, input)
 	if err != nil {
@@ -1083,6 +1302,18 @@ func (b *SystemBackend) handleRotate(
 	return nil, nil
 }
 
+func sanitizeMountPath(path string) string {
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+
+	if strings.HasPrefix(path, "/") {
+		path = path[1:]
+	}
+
+	return path
+}
+
 const sysHelpRoot = `
 The system backend is built-in to Vault and cannot be remounted or
 unmounted. It contains the paths that are used to configure Vault itself
@@ -1091,11 +1322,86 @@ as well as perform core operations.
 
 // sysHelp is all the help text for the sys backend.
 var sysHelp = map[string][2]string{
+	"init": {
+		"Initializes or returns the initialization status of the Vault.",
+		`
+This path responds to the following HTTP methods.
+
+    GET /
+        Returns the initialization status of the Vault.
+
+    POST /
+        Initializes a new vault.
+		`,
+	},
+	"generate-root": {
+		"Reads, generates, or deletes a root token regeneration process.",
+		`
+This path responds to multiple HTTP methods which change the behavior. Those
+HTTP methods are listed below.
+
+    GET /attempt
+        Reads the configuration and progress of the current root generation
+        attempt.
+
+    POST /attempt
+        Initializes a new root generation attempt. Only a single root generation
+        attempt can take place at a time. One (and only one) of otp or pgp_key
+        are required.
+
+    DELETE /attempt
+        Cancels any in-progress root generation attempt. This clears any
+        progress made. This must be called to change the OTP or PGP key being
+        used.
+		`,
+	},
+	"seal-status": {
+		"Returns the seal status of the Vault.",
+		`
+This path responds to the following HTTP methods.
+
+    GET /
+        Returns the seal status of the Vault. This is an unauthenticated
+        endpoint.
+		`,
+	},
+	"seal": {
+		"Seals the Vault.",
+		`
+This path responds to the following HTTP methods.
+
+    PUT /
+        Seals the Vault.
+		`,
+	},
+	"unseal": {
+		"Unseals the Vault.",
+		`
+This path responds to the following HTTP methods.
+
+    PUT /
+        Unseals the Vault.
+		`,
+	},
 	"mounts": {
 		"List the currently mounted backends.",
 		`
-List the currently mounted backends: the mount path, the type of the backend,
-and a user friendly description of the purpose for the mount.
+This path responds to the following HTTP methods.
+
+    GET /
+        Lists all the mounted secret backends.
+
+    GET /<mount point>
+        Get information about the mount at the specified path.
+
+    POST /<mount point>
+        Mount a new secret backend to the mount point in the URL.
+
+    POST /<mount point>/tune
+        Tune configuration parameters for the given mount point.
+
+    DELETE /<mount point>
+        Unmount the specified mount point.
 		`,
 	},
 
@@ -1140,18 +1446,11 @@ and max_lease_ttl.`,
 	"remount": {
 		"Move the mount point of an already-mounted backend.",
 		`
-Change the mount point of an already-mounted backend.
+This path responds to the following HTTP methods.
+
+    POST /sys/remount
+        Changes the mount point of an already-mounted backend.
 		`,
-	},
-
-	"remount_from": {
-		"",
-		"",
-	},
-
-	"remount_to": {
-		"",
-		"",
 	},
 
 	"mount_tune": {
@@ -1205,11 +1504,38 @@ all matching leases.
 		"",
 	},
 
+	"revoke-force": {
+		"Revoke all secrets generated in a given prefix, ignoring errors.",
+		`
+See the path help for 'revoke-prefix'; this behaves the same, except that it
+ignores errors encountered during revocation. This can be used in certain
+recovery situations; for instance, when you want to unmount a backend, but it
+is impossible to fix revocation errors and these errors prevent the unmount
+from proceeding. This is a DANGEROUS operation as it removes Vault's oversight
+of external secrets. Access to this prefix should be tightly controlled.
+		`,
+	},
+
+	"revoke-force-path": {
+		`The path to revoke keys under. Example: "prod/aws/ops"`,
+		"",
+	},
+
 	"auth-table": {
 		"List the currently enabled credential backends.",
 		`
-List the currently enabled credential backends: the name, the type of the backend,
-and a user friendly description of the purpose for the credential backend.
+This path responds to the following HTTP methods.
+
+    GET /
+        List the currently enabled credential backends: the name, the type of
+        the backend, and a user friendly description of the purpose for the
+        credential backend.
+
+    POST /<mount point>
+        Enable a new auth backend.
+
+    DELETE /<mount point>
+        Disable the auth backend at the given mount point.
 		`,
 	},
 
@@ -1240,8 +1566,19 @@ Example: you might have an OAuth backend for GitHub, and one for Google Apps.
 	"policy-list": {
 		`List the configured access control policies.`,
 		`
-List the names of the configured access control policies. Policies are associated
-with client tokens to limit access to keys in the Vault.
+This path responds to the following HTTP methods.
+
+    GET /
+        List the names of the configured access control policies.
+
+    GET /<name>
+        Retrieve the rules for the named policy.
+
+    PUT /<name>
+        Add or update a policy.
+
+    DELETE /<name>
+        Delete the policy with the given name.
 		`,
 	},
 
@@ -1271,8 +1608,16 @@ or delete a policy.
 	"audit-table": {
 		"List the currently enabled audit backends.",
 		`
-List the currently enabled audit backends: the name, the type of the backend,
-a user friendly description of the audit backend, and it's configuration options.
+This path responds to the following HTTP methods.
+
+    GET /
+        List the currently enabled audit backends.
+
+    PUT /<path>
+        Enable an audit backend at the given path.
+
+    DELETE /<path>
+        Disable the given audit backend.
 		`,
 	},
 
@@ -1317,5 +1662,28 @@ Enable a new audit backend or disable an existing backend.
 		data going to the storage backend. The old encryption keys are kept so
 		that data encrypted using those keys can still be decrypted.
 		`,
+	},
+
+	"rekey_backup": {
+		"Allows fetching or deleting the backup of the rotated unseal keys.",
+		"",
+	},
+
+	"capabilities": {
+		"Fetches the capabilities of the given token on the given path.",
+		`Returns the capabilities of the given token on the path.
+		The path will be searched for a path match in all the policies associated with the token.`,
+	},
+
+	"capabilities_self": {
+		"Fetches the capabilities of the given token on the given path.",
+		`Returns the capabilities of the client token on the path.
+		The path will be searched for a path match in all the policies associated with the client token.`,
+	},
+
+	"capabilities_accessor": {
+		"Fetches the capabilities of the token associated with the given token, on the given path.",
+		`When there is no access to the token, token accessor can be used to fetch the token's capabilities
+		on a given path.`,
 	},
 }

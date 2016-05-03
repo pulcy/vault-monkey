@@ -12,11 +12,12 @@ import (
 	"github.com/hashicorp/vault/helper/password"
 	"github.com/hashicorp/vault/helper/pgpkeys"
 	"github.com/hashicorp/vault/helper/xor"
+	"github.com/hashicorp/vault/meta"
 )
 
 // GenerateRootCommand is a Command that generates a new root token.
 type GenerateRootCommand struct {
-	Meta
+	meta.Meta
 
 	// Key can be used to pre-seed the key. If it is set, it will not
 	// be asked with the `password` helper.
@@ -30,7 +31,7 @@ func (c *GenerateRootCommand) Run(args []string) int {
 	var init, cancel, status, genotp bool
 	var nonce, decode, otp, pgpKey string
 	var pgpKeyArr pgpkeys.PubKeyFilesFlag
-	flags := c.Meta.FlagSet("generate-root", FlagSetDefault)
+	flags := c.Meta.FlagSet("generate-root", meta.FlagSetDefault)
 	flags.BoolVar(&init, "init", false, "")
 	flags.BoolVar(&cancel, "cancel", false, "")
 	flags.BoolVar(&status, "status", false, "")
@@ -140,14 +141,9 @@ func (c *GenerateRootCommand) Run(args []string) int {
 
 	// Start the root generation process if not started
 	if !rootGenerationStatus.Started {
-		err = client.Sys().GenerateRootInit(otp, pgpKey)
+		rootGenerationStatus, err = client.Sys().GenerateRootInit(otp, pgpKey)
 		if err != nil {
 			c.Ui.Error(fmt.Sprintf("Error initializing root generation: %s", err))
-			return 1
-		}
-		rootGenerationStatus, err = client.Sys().GenerateRootStatus()
-		if err != nil {
-			c.Ui.Error(fmt.Sprintf("Error reading root generation status: %s", err))
 			return 1
 		}
 		c.Nonce = rootGenerationStatus.Nonce
@@ -229,14 +225,15 @@ func (c *GenerateRootCommand) decode(encodedVal, otp string) int {
 // initGenerateRoot is used to start the generation process
 func (c *GenerateRootCommand) initGenerateRoot(client *api.Client, otp string, pgpKey string) int {
 	// Start the rekey
-	err := client.Sys().GenerateRootInit(otp, pgpKey)
+	status, err := client.Sys().GenerateRootInit(otp, pgpKey)
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Error initializing root generation: %s", err))
 		return 1
 	}
 
-	// Provide the current status
-	return c.rootGenerationStatus(client)
+	c.dumpStatus(status)
+
+	return 0
 }
 
 // cancelGenerateRoot is used to abort the generation process
@@ -318,9 +315,7 @@ Usage: vault generate-root [options] [key]
   final token value will be encrypted with this public key and base64-encoded.
   
 General Options:
-
-  ` + generalOptionsUsage() + `
-
+` + meta.GeneralOptionsUsage() + `
 Rekey Options:
 
   -init                   Initialize the root generation attempt. This can only

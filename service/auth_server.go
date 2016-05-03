@@ -52,8 +52,12 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 
 	// Perform step 1 login
 	s.log.Debug("Step 1 login")
-	s.vaultClient.ClearToken()
-	logical := s.vaultClient.Logical()
+	vaultClient, err := s.newClient()
+	if err != nil {
+		return maskAny(err)
+	}
+	vaultClient.ClearToken()
+	logical := vaultClient.Logical()
 	step1Data := make(map[string]interface{})
 	step1Data["app_id"] = clusterID
 	step1Data["user_id"] = machineID
@@ -63,7 +67,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 		return maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in step 1 secret response"))
 	} else {
 		// Use step1 token
-		s.vaultClient.SetToken(loginSecret.Auth.ClientToken)
+		vaultClient.SetToken(loginSecret.Auth.ClientToken)
 	}
 
 	// Read cluster/job specific user-id
@@ -71,7 +75,6 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterID, jobID)
 	userIdSecret, err := logical.Read(userIdPath)
 	if err != nil {
-		s.vaultClient.ClearToken()
 		return maskAny(err)
 	}
 
@@ -83,7 +86,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 
 	// Perform step 2 login
 	s.log.Debug("Step 2 login")
-	s.vaultClient.ClearToken()
+	vaultClient.ClearToken()
 	step2Data := make(map[string]interface{})
 	step2Data["app_id"] = jobID
 	step2Data["user_id"] = userId
@@ -93,7 +96,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 		return maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in step 2 secret response"))
 	} else {
 		// Use step2 token
-		s.vaultClient.SetToken(loginSecret.Auth.ClientToken)
+		s.token = loginSecret.Auth.ClientToken
 	}
 
 	// We're done

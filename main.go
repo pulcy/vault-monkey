@@ -54,10 +54,11 @@ var (
 
 func init() {
 	logging.SetFormatter(logging.MustStringFormatter("[%{level:-5s}] %{message}"))
+	globalFlags.VaultAddr = os.Getenv("VAULT_ADDR")
 	globalFlags.VaultCACert = os.Getenv("VAULT_CACERT")
 	globalFlags.VaultCAPath = os.Getenv("VAULT_CAPATH")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.logLevel, "log-level", defaultLogLevel, "Log level (debug|info|warning|error)")
-	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultAddr, "vault-addr", "", "URL of the vault (defaults to VAULT_ADDR environment variable)")
+	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultAddr, "vault-addr", globalFlags.VaultAddr, "URL of the vault (defaults to VAULT_ADDR environment variable)")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultCACert, "vault-cacert", globalFlags.VaultCACert, "Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultCAPath, "vault-capath", globalFlags.VaultCAPath, "Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.TokenPath, "token-path", "", "Path of a file containing your vault token (token defaults to VAULT_TOKEN environment variable)")

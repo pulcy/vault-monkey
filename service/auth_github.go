@@ -28,8 +28,12 @@ type GithubLoginData struct {
 // GithubLogin performs a standard Github authentication and initializes the vaultClient with the resulting token.
 func (s *VaultService) GithubLogin(data GithubLoginData) error {
 	// Perform login
-	s.vaultClient.ClearToken()
-	logical := s.vaultClient.Logical()
+	vaultClient, err := s.newClient()
+	if err != nil {
+		return maskAny(err)
+	}
+	vaultClient.ClearToken()
+	logical := vaultClient.Logical()
 	loginData := make(map[string]interface{})
 	loginData["token"] = data.GithubToken
 	if data.Mount == "" {
@@ -42,7 +46,7 @@ func (s *VaultService) GithubLogin(data GithubLoginData) error {
 		return maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in secret response"))
 	} else {
 		// Use token
-		s.vaultClient.SetToken(loginSecret.Auth.ClientToken)
+		s.token = loginSecret.Auth.ClientToken
 	}
 
 	// We're done

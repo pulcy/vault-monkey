@@ -92,6 +92,12 @@ vault-monkey job delete -G <github-token> --job-id <cluster-id>
 
 Note that deleting a job does not remove all cluster grants.
 
+To show the seal status of all instances of a vault, use:
+
+```
+vault-monkey seal-status -G <github-token>
+```
+
 To seal a vault, use:
 
 ```

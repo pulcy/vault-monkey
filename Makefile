@@ -17,7 +17,7 @@ REPOPATH := $(ORGPATH)/$(REPONAME)
 BIN := $(BINDIR)/$(PROJECT)
 
 GOPATH := $(GOBUILDDIR)
-GOVERSION := 1.6.0-alpine
+GOVERSION := 1.6.2-alpine
 
 ifndef GOOS
 	GOOS := linux
@@ -56,6 +56,7 @@ update-vendor:
 		github.com/kr/pretty \
 		github.com/mitchellh/mapstructure \
 		github.com/op/go-logging \
+		github.com/ryanuber/columnize \
 		github.com/spf13/cobra \
 		github.com/spf13/pflag
 

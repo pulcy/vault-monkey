@@ -15,6 +15,8 @@
 package service
 
 import (
+	"strings"
+
 	"github.com/juju/errgo"
 )
 
@@ -23,3 +25,32 @@ var (
 	VaultError           = errgo.New("vault error")
 	maskAny              = errgo.MaskFunc(errgo.Any)
 )
+
+type AggregateError struct {
+	errors []error
+}
+
+func collectErrorsFromChannel(errors chan error) error {
+	ae := &AggregateError{}
+	for err := range errors {
+		if err != nil {
+			ae.errors = append(ae.errors, err)
+		}
+	}
+	switch len(ae.errors) {
+	case 0:
+		return nil // no error
+	case 1:
+		return ae.errors[0]
+	default:
+		return ae
+	}
+}
+
+func (ae *AggregateError) Error() string {
+	l := []string{}
+	for _, err := range ae.errors {
+		l = append(l, err.Error())
+	}
+	return strings.Join(l, ", ")
+}

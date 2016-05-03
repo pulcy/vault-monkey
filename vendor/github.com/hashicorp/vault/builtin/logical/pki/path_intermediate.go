@@ -167,7 +167,7 @@ func (b *backend) pathSetSignedIntermediate(
 	}
 
 	if len(cb.PrivateKey) == 0 || cb.PrivateKeyType == "" {
-		return logical.ErrorResponse("could not find an existing privat key"), nil
+		return logical.ErrorResponse("could not find an existing private key"), nil
 	}
 
 	parsedCB, err := cb.ToParsedCertBundle()
@@ -204,6 +204,13 @@ func (b *backend) pathSetSignedIntermediate(
 	if err != nil {
 		return nil, err
 	}
+	err = req.Storage.Put(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	entry.Key = "certs/" + cb.SerialNumber
+	entry.Value = inputBundle.CertificateBytes
 	err = req.Storage.Put(entry)
 	if err != nil {
 		return nil, err

@@ -20,6 +20,8 @@ import (
 const (
 	// kdfMode is the only KDF mode currently supported
 	kdfMode = "hmac-sha256-counter"
+
+	ErrTooOld = "ciphertext version is disallowed by policy (too old)"
 )
 
 // policyCache implements a simple locking cache of policies
@@ -39,7 +41,7 @@ func (p *policyCache) getPolicy(req *logical.Request, name string) (*lockingPoli
 		return p.cache[name], nil
 	}
 
-	// If we find anything, we'll need to write into the cache, plus possibly
+	// If we didn't find anything, we'll need to write into the cache, plus possibly
 	// persist the entry, so lock the cache
 	p.RUnlock()
 	p.Lock()
@@ -539,7 +541,7 @@ func (p *Policy) Decrypt(context []byte, value string) (string, error) {
 	}
 
 	if p.MinDecryptionVersion > 0 && ver < p.MinDecryptionVersion {
-		return "", certutil.UserError{Err: "ciphertext version is disallowed by policy (too old)"}
+		return "", certutil.UserError{Err: ErrTooOld}
 	}
 
 	// Derive the key that should be used
