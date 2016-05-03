@@ -29,7 +29,7 @@ func (s *VaultService) extractSecret(secretPath, secretField string) (string, er
 	}
 
 	// Load secret
-	s.log.Info("Read %s#%s", secretPath, secretField)
+	s.log.Infof("Read %s#%s", secretPath, secretField)
 	vaultClient, err := s.newClient()
 	if err != nil {
 		return "", maskAny(err)
