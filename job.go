@@ -77,7 +77,11 @@ func cmdJobCreateRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Job().Create(jobFlags.jobID, jobFlags.policyName); err != nil {
+	job, err := vs.Job()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := job.Create(jobFlags.jobID, jobFlags.policyName); err != nil {
 		Exitf("Failed to create job: %v", err)
 	}
 }
@@ -90,7 +94,11 @@ func cmdJobDeleteRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Job().Delete(jobFlags.jobID); err != nil {
+	job, err := vs.Job()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := job.Delete(jobFlags.jobID); err != nil {
 		Exitf("Failed to delete job: %v", err)
 	}
 }
@@ -104,7 +112,11 @@ func cmdJobAllowClusterRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Job().AllowCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
+	job, err := vs.Job()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := job.AllowCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
 		Exitf("Failed to allow cluster to access secrets of a job: %v", err)
 	}
 }
@@ -118,7 +130,11 @@ func cmdJobDenyClusterRun(cmd *cobra.Command, args []string) {
 		Exitf("Login failed: %v", err)
 	}
 
-	if err := vs.Job().DenyCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
+	job, err := vs.Job()
+	if err != nil {
+		Exitf("Client creation failed: %v", err)
+	}
+	if err := job.DenyCluster(jobFlags.jobID, jobFlags.clusterID); err != nil {
 		Exitf("Failed to deny cluster access to secrets of a job: %v", err)
 	}
 }

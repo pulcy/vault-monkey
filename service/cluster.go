@@ -33,8 +33,12 @@ type Cluster struct {
 	vaultClient *api.Client
 }
 
-func (vs *VaultService) Cluster() *Cluster {
-	return &Cluster{vaultClient: vs.vaultClient}
+func (vs *VaultService) Cluster() (*Cluster, error) {
+	vaultClient, err := vs.newClient()
+	if err != nil {
+		return nil, maskAny(err)
+	}
+	return &Cluster{vaultClient: vaultClient}, nil
 }
 
 // Create creates the app-id mapping for a cluster with given id.

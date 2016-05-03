@@ -31,8 +31,12 @@ type Job struct {
 	vaultClient *api.Client
 }
 
-func (vs *VaultService) Job() *Job {
-	return &Job{vaultClient: vs.vaultClient}
+func (vs *VaultService) Job() (*Job, error) {
+	vaultClient, err := vs.newClient()
+	if err != nil {
+		return nil, maskAny(err)
+	}
+	return &Job{vaultClient: vaultClient}, nil
 }
 
 // Create creates the app-id mapping for a job with given id.
