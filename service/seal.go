@@ -39,7 +39,7 @@ func init() {
 func (s *VaultService) SealStatus() error {
 	m := sync.Mutex{}
 	lines := []string{
-		"Address | Status | T | N | Progress",
+		"Address | Status | Key Threshold | Key Shares | Unseal Progress",
 	}
 	seal := func(client VaultClient) error {
 		s.log.Debugf("Fetching seal status of vault at %s", client.Address)
