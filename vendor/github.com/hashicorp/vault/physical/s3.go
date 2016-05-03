@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -24,12 +25,13 @@ import (
 type S3Backend struct {
 	bucket string
 	client *s3.S3
+	logger *log.Logger
 }
 
 // newS3Backend constructs a S3 backend using a pre-existing
 // bucket. Credentials can be provided to the backend, sourced
 // from the environment, AWS credential files or by IAM role.
-func newS3Backend(conf map[string]string) (Backend, error) {
+func newS3Backend(conf map[string]string, logger *log.Logger) (Backend, error) {
 
 	bucket := os.Getenv("AWS_S3_BUCKET")
 	if bucket == "" {
@@ -88,6 +90,7 @@ func newS3Backend(conf map[string]string) (Backend, error) {
 	s := &S3Backend{
 		client: s3conn,
 		bucket: bucket,
+		logger: logger,
 	}
 	return s, nil
 }
@@ -117,7 +120,6 @@ func (s *S3Backend) Get(key string) (*Entry, error) {
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
-
 	if awsErr, ok := err.(awserr.RequestFailure); ok {
 		// Return nil on 404s, error on anything else
 		if awsErr.StatusCode() == 404 {
@@ -125,6 +127,12 @@ func (s *S3Backend) Get(key string) (*Entry, error) {
 		} else {
 			return nil, err
 		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("got nil response from S3 but no error")
 	}
 
 	data := make([]byte, *resp.ContentLength)
@@ -168,6 +176,9 @@ func (s *S3Backend) List(prefix string) ([]string, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nil response from S3 but no error")
 	}
 
 	keys := []string{}

@@ -16,6 +16,8 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+
+	"github.com/pulcy/vault-monkey/service"
 )
 
 var (
@@ -31,7 +33,7 @@ func init() {
 }
 
 func cmdSealStatusRun(cmd *cobra.Command, args []string) {
-	vs, err := adminLogin()
+	vs, err := service.NewVaultService(log, globalFlags.VaultServiceConfig)
 	if err != nil {
 		Exitf("Failed to create vault service: %#v", err)
 	}

@@ -11,6 +11,11 @@ description: |-
 This page contains the list of breaking changes for Vault 0.5. Please read it
 carefully.
 
+Please note that these are changes to Vault itself. Client libraries maintained
+by HashiCorp have been updated with support for these changes, but if you are
+using community-supported libraries, you should ensure that they are ready for
+Vault 0.5 before upgrading.
+
 ## Rekey Requires Nonce
 
 Vault now generates a nonce when a rekey operation is started in order to
@@ -47,6 +52,11 @@ the `renew-self` endpoint will be used in the API rather than the `renew`
 endpoint. Since the `default` policy contains `auth/token/renew-self` this
 makes it much more likely that the request will succeed rather than somewhat
 confusingly failing due to a lack of permissions on `auth/token/renew`.
+
+## `status` CLI Command
+The `status` CLI command now returns an exit code of `0` for an unsealed Vault
+(as before), `2` for a sealed Vault, and `1` for an error. This keeps error
+return codes consistent across commands.
 
 ## Transit Upsertion Behavior Uses Capabilities
 

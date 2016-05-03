@@ -216,9 +216,9 @@ func (b *backend) getRole(s logical.Storage, n string) (*roleEntry, error) {
 			} else {
 				result.AllowedDomains += "," + result.AllowedBaseDomain
 			}
-			result.AllowedBaseDomain = ""
-			modified = true
 		}
+		result.AllowedBaseDomain = ""
+		modified = true
 	}
 
 	if modified {
@@ -306,6 +306,10 @@ func (b *backend) pathRoleCreate(
 		KeyType:             data.Get("key_type").(string),
 		KeyBits:             data.Get("key_bits").(int),
 		UseCSRCommonName:    data.Get("use_csr_common_name").(bool),
+	}
+
+	if entry.KeyType == "rsa" && entry.KeyBits < 2048 {
+		return logical.ErrorResponse("RSA keys < 2048 bits are unsafe and not supported"), nil
 	}
 
 	var maxTTL time.Duration

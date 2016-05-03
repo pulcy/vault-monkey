@@ -1,7 +1,9 @@
 package pki
 
 import (
+	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -160,19 +162,24 @@ func fetchCertBySerial(req *logical.Request, prefix, serial string) (*logical.St
 	var path string
 
 	switch {
+	// Revoked goes first as otherwise ca/crl get hardcoded paths which fail if
+	// we actually want revocation info
+	case strings.HasPrefix(prefix, "revoked/"):
+		path = "revoked/" + strings.Replace(strings.ToLower(serial), "-", ":", -1)
 	case serial == "ca":
 		path = "ca"
 	case serial == "crl":
 		path = "crl"
-	case strings.HasPrefix(prefix, "revoked/"):
-		path = "revoked/" + strings.Replace(strings.ToLower(serial), "-", ":", -1)
 	default:
 		path = "certs/" + strings.Replace(strings.ToLower(serial), "-", ":", -1)
 	}
 
 	certEntry, err := req.Storage.Get(path)
-	if err != nil || certEntry == nil {
-		return nil, certutil.InternalError{Err: fmt.Sprintf("certificate with serial number %s not found", serial)}
+	if err != nil {
+		return nil, certutil.InternalError{Err: fmt.Sprintf("error fetching certificate %s: %s", serial, err)}
+	}
+	if certEntry == nil {
+		return nil, nil
 	}
 
 	if certEntry.Value == nil || len(certEntry.Value) == 0 {
@@ -349,6 +356,10 @@ func generateCert(b *backend,
 	req *logical.Request,
 	data *framework.FieldData) (*certutil.ParsedCertBundle, error) {
 
+	if role.KeyType == "rsa" && role.KeyBits < 2048 {
+		return nil, certutil.UserError{Err: "RSA keys < 2048 bits are unsafe and not supported"}
+	}
+
 	creationBundle, err := generateCreationBundle(b, role, signingBundle, nil, req, data)
 	if err != nil {
 		return nil, err
@@ -432,13 +443,73 @@ func signCert(b *backend,
 		return nil, certutil.UserError{Err: "certificate request could not be parsed"}
 	}
 
+	switch role.KeyType {
+	case "rsa":
+		// Verify that the key matches the role type
+		if csr.PublicKeyAlgorithm != x509.RSA {
+			return nil, certutil.UserError{Err: fmt.Sprintf(
+				"role requires keys of type %s",
+				role.KeyType)}
+		}
+		pubKey, ok := csr.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return nil, certutil.UserError{Err: "could not parse CSR's public key"}
+		}
+
+		// Verify that the key is at least 2048 bits
+		if pubKey.N.BitLen() < 2048 {
+			return nil, certutil.UserError{Err: "RSA keys < 2048 bits are unsafe and not supported"}
+		}
+
+		// Verify that the bit size is at least the size specified in the role
+		if pubKey.N.BitLen() < role.KeyBits {
+			return nil, certutil.UserError{Err: fmt.Sprintf(
+				"role requires a minimum of a %d-bit key, but CSR's key is %d bits",
+				role.KeyBits,
+				pubKey.N.BitLen())}
+		}
+
+	case "ec":
+		// Verify that the key matches the role type
+		if csr.PublicKeyAlgorithm != x509.ECDSA {
+			return nil, certutil.UserError{Err: fmt.Sprintf(
+				"role requires keys of type %s",
+				role.KeyType)}
+		}
+		pubKey, ok := csr.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			return nil, certutil.UserError{Err: "could not parse CSR's public key"}
+		}
+
+		// Verify that the bit size is at least the size specified in the role
+		if pubKey.Params().BitSize < role.KeyBits {
+			return nil, certutil.UserError{Err: fmt.Sprintf(
+				"role requires a minimum of a %d-bit key, but CSR's key is %d bits",
+				role.KeyBits,
+				pubKey.Params().BitSize)}
+		}
+
+	case "any":
+		// We only care about running RSA < 2048 bit checks, so if not RSA
+		// break out
+		if csr.PublicKeyAlgorithm != x509.RSA {
+			break
+		}
+
+		// Run RSA < 2048 bit checks
+		pubKey, ok := csr.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return nil, certutil.UserError{Err: "could not parse CSR's public key"}
+		}
+		if pubKey.N.BitLen() < 2048 {
+			return nil, certutil.UserError{Err: "RSA keys < 2048 bits are unsafe and not supported"}
+		}
+
+	}
+
 	creationBundle, err := generateCreationBundle(b, role, signingBundle, csr, req, data)
 	if err != nil {
 		return nil, err
-	}
-
-	if useCSRValues && !isCA {
-		return nil, certutil.UserError{Err: "cannot use CSR values with a non-CA certificate"}
 	}
 
 	creationBundle.IsCA = isCA
@@ -484,15 +555,17 @@ func generateCreationBundle(b *backend,
 	dnsNames := []string{}
 	emailAddresses := []string{}
 	{
-		if strings.Contains(cn, "@") {
-			// Note: emails are not disallowed if the role's email protection
-			// flag is false, because they may well be included for
-			// informational purposes; it is up to the verifying party to
-			// ensure that email addresses in a subject alternate name can be
-			// used for the purpose for which they are presented
-			emailAddresses = append(emailAddresses, cn)
-		} else {
-			dnsNames = append(dnsNames, cn)
+		if !data.Get("exclude_cn_from_sans").(bool) {
+			if strings.Contains(cn, "@") {
+				// Note: emails are not disallowed if the role's email protection
+				// flag is false, because they may well be included for
+				// informational purposes; it is up to the verifying party to
+				// ensure that email addresses in a subject alternate name can be
+				// used for the purpose for which they are presented
+				emailAddresses = append(emailAddresses, cn)
+			} else {
+				dnsNames = append(dnsNames, cn)
+			}
 		}
 		cnAltInt, ok := data.GetOk("alt_names")
 		if ok {
@@ -717,7 +790,7 @@ func createCertificate(creationInfo *creationBundle) (*certutil.ParsedCertBundle
 	certTemplate := &x509.Certificate{
 		SerialNumber:   serialNumber,
 		Subject:        subject,
-		NotBefore:      time.Now(),
+		NotBefore:      time.Now().Add(-30 * time.Second),
 		NotAfter:       time.Now().Add(creationInfo.TTL),
 		IsCA:           false,
 		SubjectKeyId:   subjKeyID,
@@ -873,7 +946,7 @@ func signCertificate(creationInfo *creationBundle,
 	certTemplate := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject:      subject,
-		NotBefore:    time.Now(),
+		NotBefore:    time.Now().Add(-30 * time.Second),
 		NotAfter:     time.Now().Add(creationInfo.TTL),
 		SubjectKeyId: subjKeyID[:],
 	}

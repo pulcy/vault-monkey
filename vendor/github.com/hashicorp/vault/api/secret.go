@@ -28,6 +28,7 @@ type Secret struct {
 // SecretAuth is the structure containing auth information if we have it.
 type SecretAuth struct {
 	ClientToken string            `json:"client_token"`
+	Accessor    string            `json:"accessor"`
 	Policies    []string          `json:"policies"`
 	Metadata    map[string]string `json:"metadata"`
 
@@ -40,6 +41,7 @@ func ParseSecret(r io.Reader) (*Secret, error) {
 	// First decode the JSON into a map[string]interface{}
 	var secret Secret
 	dec := json.NewDecoder(r)
+	dec.UseNumber()
 	if err := dec.Decode(&secret); err != nil {
 		return nil, err
 	}

@@ -73,6 +73,7 @@ func (s *VaultService) Seal() error {
 		if err := client.Client.Sys().Seal(); err != nil {
 			return maskAny(err)
 		}
+		s.log.Infof("Vault at %s is now sealed", client.Address)
 		return nil
 	}
 	if err := s.asyncForEachClient(seal); err != nil {

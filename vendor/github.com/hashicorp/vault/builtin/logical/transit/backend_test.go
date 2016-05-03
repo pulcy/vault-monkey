@@ -3,11 +3,16 @@ package transit
 import (
 	"encoding/base64"
 	"fmt"
+	"math/rand"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/vault/logical"
+	"github.com/hashicorp/vault/logical/framework"
 	logicaltest "github.com/hashicorp/vault/logical/testing"
 	"github.com/mitchellh/mapstructure"
 )
@@ -19,7 +24,8 @@ const (
 func TestBackend_basic(t *testing.T) {
 	decryptData := make(map[string]interface{})
 	logicaltest.Test(t, logicaltest.TestCase{
-		Factory: Factory,
+		AcceptanceTest: true,
+		Factory:        Factory,
 		Steps: []logicaltest.TestStep{
 			testAccStepWritePolicy(t, "test", false),
 			testAccStepReadPolicy(t, "test", false, false),
@@ -42,7 +48,8 @@ func TestBackend_basic(t *testing.T) {
 func TestBackend_upsert(t *testing.T) {
 	decryptData := make(map[string]interface{})
 	logicaltest.Test(t, logicaltest.TestCase{
-		Factory: Factory,
+		AcceptanceTest: true,
+		Factory:        Factory,
 		Steps: []logicaltest.TestStep{
 			testAccStepReadPolicy(t, "test", true, false),
 			testAccStepEncryptUpsert(t, "test", testPlaintext, decryptData),
@@ -55,7 +62,8 @@ func TestBackend_upsert(t *testing.T) {
 func TestBackend_datakey(t *testing.T) {
 	dataKeyInfo := make(map[string]interface{})
 	logicaltest.Test(t, logicaltest.TestCase{
-		Factory: Factory,
+		AcceptanceTest: true,
+		Factory:        Factory,
 		Steps: []logicaltest.TestStep{
 			testAccStepWritePolicy(t, "test", false),
 			testAccStepReadPolicy(t, "test", false, false),
@@ -70,7 +78,8 @@ func TestBackend_rotation(t *testing.T) {
 	decryptData := make(map[string]interface{})
 	encryptHistory := make(map[int]map[string]interface{})
 	logicaltest.Test(t, logicaltest.TestCase{
-		Factory: Factory,
+		AcceptanceTest: true,
+		Factory:        Factory,
 		Steps: []logicaltest.TestStep{
 			testAccStepWritePolicy(t, "test", false),
 			testAccStepEncryptVX(t, "test", testPlaintext, decryptData, 0, encryptHistory),
@@ -127,7 +136,8 @@ func TestBackend_rotation(t *testing.T) {
 func TestBackend_basic_derived(t *testing.T) {
 	decryptData := make(map[string]interface{})
 	logicaltest.Test(t, logicaltest.TestCase{
-		Factory: Factory,
+		AcceptanceTest: true,
+		Factory:        Factory,
 		Steps: []logicaltest.TestStep{
 			testAccStepWritePolicy(t, "test", true),
 			testAccStepReadPolicy(t, "test", false, true),
@@ -518,7 +528,7 @@ func testAccStepDecryptDatakey(t *testing.T, name string,
 			}
 
 			if d.Plaintext != dataKeyInfo["plaintext"].(string) {
-				return fmt.Errorf("plaintext mismatch: got '%s', expected '%s', decryptData was %#v", d.Plaintext, dataKeyInfo["plaintext"].(string))
+				return fmt.Errorf("plaintext mismatch: got '%s', expected '%s', decryptData was %#v", d.Plaintext, dataKeyInfo["plaintext"].(string), resp.Data)
 			}
 			return nil
 		},
@@ -540,4 +550,142 @@ func TestKeyUpgrade(t *testing.T) {
 		string(p.Keys[1].Key) != testPlaintext {
 		t.Errorf("bad key migration, result is %#v", p.Keys)
 	}
+}
+
+func TestPolicyFuzzing(t *testing.T) {
+	// Don't run if not during acceptance tests
+	if os.Getenv(logicaltest.TestEnvVar) == "" {
+		t.Skip(fmt.Sprintf("Acceptance tests skipped unless env '%s' set", logicaltest.TestEnvVar))
+		return
+	}
+
+	be := Backend()
+
+	storage := &logical.LockingInmemStorage{}
+	wg := sync.WaitGroup{}
+
+	funcs := []string{"encrypt", "decrypt", "rotate", "change_min_version"}
+	keys := []string{"test1", "test2", "test3"}
+
+	// This is the goroutine loop
+	doFuzzy := func() {
+		// Check for panics, otherwise notify we're done
+		defer func() {
+			if err := recover(); err != nil {
+				t.Fatalf("got a panic: %v", err)
+			}
+			wg.Done()
+		}()
+
+		// Holds the latest encrypted value for each key
+		latestEncryptedText := map[string]string{}
+
+		startTime := time.Now()
+		req := &logical.Request{
+			Storage: storage,
+			Data:    map[string]interface{}{},
+		}
+		fd := &framework.FieldData{}
+
+		for {
+			// Stop after 10 seconds
+			if time.Now().Sub(startTime) > 10*time.Second {
+				return
+			}
+
+			// Pick a function and a key
+			chosenFunc := funcs[rand.Int()%len(funcs)]
+			chosenKey := keys[rand.Int()%len(keys)]
+
+			fd.Raw = map[string]interface{}{
+				"name": chosenKey,
+			}
+			fd.Schema = be.pathKeys().Fields
+
+			// Try to write the key to make sure it exists
+			_, err := be.pathPolicyWrite(req, fd)
+			if err != nil {
+				t.Errorf("got an error: %v", err)
+				return
+			}
+
+			switch chosenFunc {
+			// Encrypt our plaintext and store the result
+			case "encrypt":
+				fd.Raw["plaintext"] = base64.StdEncoding.EncodeToString([]byte(testPlaintext))
+				fd.Schema = be.pathEncrypt().Fields
+				resp, err := be.pathEncryptWrite(req, fd)
+				if err != nil {
+					t.Errorf("got an error: %v, resp is %#v", err, *resp)
+					return
+				}
+				latestEncryptedText[chosenKey] = resp.Data["ciphertext"].(string)
+
+			// Rotate to a new key version
+			case "rotate":
+				fd.Schema = be.pathRotate().Fields
+				resp, err := be.pathRotateWrite(req, fd)
+				if err != nil {
+					t.Errorf("got an error: %v, resp is %#v", err, *resp)
+					return
+				}
+
+			// Decrypt the ciphertext and compare the result
+			case "decrypt":
+				ct := latestEncryptedText[chosenKey]
+				if ct == "" {
+					continue
+				}
+
+				fd.Raw["ciphertext"] = ct
+				fd.Schema = be.pathDecrypt().Fields
+				resp, err := be.pathDecryptWrite(req, fd)
+				if err != nil {
+					// This could well happen since the min version is jumping around
+					if resp.Data["error"].(string) == ErrTooOld {
+						continue
+					}
+					t.Errorf("got an error: %v, resp is %#v, ciphertext was %s", err, *resp, latestEncryptedText[chosenKey])
+					return
+				}
+				ptb64 := resp.Data["plaintext"].(string)
+				pt, err := base64.StdEncoding.DecodeString(ptb64)
+				if err != nil {
+					t.Errorf("got an error decoding base64 plaintext: %v", err)
+					return
+				}
+				if string(pt) != testPlaintext {
+					t.Fatalf("got bad plaintext back: %s", pt)
+				}
+
+			// Change the min version, which also tests the archive functionality
+			case "change_min_version":
+				resp, err := be.pathPolicyRead(req, fd)
+				if err != nil {
+					t.Errorf("got an error reading policy %s: %v", chosenKey, err)
+					return
+				}
+				latestVersion := resp.Data["latest_version"].(int)
+
+				// keys start at version 1 so we want [1, latestVersion] not [0, latestVersion)
+				setVersion := (rand.Int() % latestVersion) + 1
+				fd.Raw["min_decryption_version"] = setVersion
+				fd.Schema = be.pathConfig().Fields
+				resp, err = be.pathConfigWrite(req, fd)
+				if err != nil {
+					t.Errorf("got an error setting min decryption version: %v", err)
+					return
+				}
+			}
+		}
+	}
+
+	// Spawn 1000 of these workers for 10 seconds
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go doFuzzy()
+	}
+
+	// Wait for them all to finish
+	wg.Wait()
 }

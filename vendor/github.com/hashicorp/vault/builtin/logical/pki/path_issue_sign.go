@@ -123,6 +123,7 @@ func (b *backend) pathSignVerbatim(
 		AllowAnyName:     true,
 		AllowIPSANs:      true,
 		EnforceHostnames: false,
+		KeyType:          "any",
 	}
 
 	return b.pathIssueSignCert(req, data, role, true, true)
@@ -170,8 +171,9 @@ func (b *backend) pathIssueSignCert(
 
 	resp := b.Secret(SecretCertsType).Response(
 		map[string]interface{}{
-			"certificate": cb.Certificate,
-			"issuing_ca":  cb.IssuingCA,
+			"certificate":   cb.Certificate,
+			"issuing_ca":    cb.IssuingCA,
+			"serial_number": cb.SerialNumber,
 		},
 		map[string]interface{}{
 			"serial_number": cb.SerialNumber,

@@ -119,6 +119,14 @@ If you are using issued certificates for client authentication to Vault, note
 that as of 0.4, the `cert` authentication endpoint supports being pushed CRLs,
 but it cannot read CRLs directly from this backend.
 
+### Safe Minimums
+
+Since its inception, this backend has enforced SHA256 for signature hashes
+rather than SHA1. As of 0.5.1, a minimum of 2048 bits for RSA keys is also
+enforced. Software that can handle SHA256 signatures should also be able to
+handle 2048-bit keys, and 1024-bit keys are considered unsafe and are
+disallowed in the Internet PKI.
+
 ## Quick Start
 
 #### Mount the backend
@@ -227,7 +235,7 @@ Success! Data written to: pki/ca/urls
 #### Configure a role
 
 The next step is to configure a role. A role is a logical name that maps to a
-policy used to generated those credentials. For example, let's create an
+policy used to generate those credentials. For example, let's create an
 "example-dot-com" role:
 
 ```text
@@ -757,6 +765,14 @@ subpath for interactive help output.
         The number of bits to use. Defaults to `2048`. Must be changed to a
         valid value if the `key_type` is `ec`.
       </li>
+      <li>
+        <span class="param">exclude_cn_from_sans</span>
+        <span class="param-flags">optional</span>
+        If set, the given `common_name` will not be included in DNS or Email
+        Subject Alternate Names (as appropriate). Useful if the CN is not a
+        hostname or email address, but is instead some human-readable
+        identifier.
+      </li>
     </ul>
   </dd>
 
@@ -770,7 +786,10 @@ subpath for interactive help output.
       "lease_duration": 21600,
       "data": {
         "csr": "-----BEGIN CERTIFICATE REQUEST-----\nMIIDzDCCAragAwIBAgIUOd0ukLcjH43TfTHFG9qE0FtlMVgwCwYJKoZIhvcNAQEL\n...\numkqeYeO30g1uYvDuWLXVA==\n-----END CERTIFICATE REQUEST-----\n",
+        "private_key": "-----BEGIN RSA PRIVATE KEY-----\\nMIIEpAIBAAKCAQEAwsANtGz9gS3o5SwTSlOG1l-----END RSA PRIVATE KEY-----",
+        "private_key_type": "rsa"
         },
+      "warnings": null,
       "auth": null
     }
     ```
@@ -867,6 +886,14 @@ subpath for interactive help output.
         `pem_bundle`, the `certificate` field will contain the private key,
         certificate, and issuing CA, concatenated.
       </li>
+      <li>
+        <span class="param">exclude_cn_from_sans</span>
+        <span class="param-flags">optional</span>
+        If set, the given `common_name` will not be included in DNS or Email
+        Subject Alternate Names (as appropriate). Useful if the CN is not a
+        hostname or email address, but is instead some human-readable
+        identifier.
+      </li>
     </ul>
   </dd>
 
@@ -882,8 +909,10 @@ subpath for interactive help output.
         "certificate": "-----BEGIN CERTIFICATE-----\nMIIDzDCCAragAwIBAgIUOd0ukLcjH43TfTHFG9qE0FtlMVgwCwYJKoZIhvcNAQEL\n...\numkqeYeO30g1uYvDuWLXVA==\n-----END CERTIFICATE-----\n",
         "issuing_ca": "-----BEGIN CERTIFICATE-----\nMIIDUTCCAjmgAwIBAgIJAKM+z4MSfw2mMA0GCSqGSIb3DQEBCwUAMBsxGTAXBgNV\n...\nG/7g4koczXLoUM3OQXd5Aq2cs4SS1vODrYmgbioFsQ3eDHd1fg==\n-----END CERTIFICATE-----\n",
         "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAnVHfwoKsUG1GDVyWB1AFroaKl2ImMBO8EnvGLRrmobIkQvh+\n...\nQN351pgTphi6nlCkGPzkDuwvtxSxiCWXQcaxrHAL7MiJpPzkIBq1\n-----END RSA PRIVATE KEY-----\n",
-        "serial": "39:dd:2e:90:b7:23:1f:8d:d3:7d:31:c5:1b:da:84:d0:5b:65:31:58"
+        "private_key_type": "rsa",
+        "serial_number": "39:dd:2e:90:b7:23:1f:8d:d3:7d:31:c5:1b:da:84:d0:5b:65:31:58"
         },
+      "warnings": "",  
       "auth": null
     }
     ```
@@ -1068,6 +1097,7 @@ subpath for interactive help output.
         If set, when used with the CSR signing endpoint, the common name in the
         CSR will be used instead of taken from the JSON data. This does `not`
         include any requested SANs in the CSR. Defaults to `false`.
+      </li>
     </ul>
   </dd>
 
@@ -1235,8 +1265,8 @@ subpath for interactive help output.
         max).
       </li>
       <li>
-      <span class="param">format</span>
-      <span class="param-flags">optional</span>
+        <span class="param">format</span>
+        <span class="param-flags">optional</span>
         Format for returned data. Can be `pem`, `der`, or `pem_bundle`;
         defaults to `pem`. If `der`, the output is base64 encoded. If
         `pem_bundle`, the `certificate` field will contain the private key (if exported),
@@ -1261,6 +1291,14 @@ subpath for interactive help output.
         has a maximum path length set, in which case the path length is set to
         one less than that of the signing certificate.  A limit of `0` means a
         literal path length of zero.
+      </li>
+      <li>
+        <span class="param">exclude_cn_from_sans</span>
+        <span class="param-flags">optional</span>
+        If set, the given `common_name` will not be included in DNS or Email
+        Subject Alternate Names (as appropriate). Useful if the CN is not a
+        hostname or email address, but is instead some human-readable
+        identifier.
       </li>
     </ul>
   </dd>
@@ -1354,6 +1392,14 @@ subpath for interactive help output.
         literal path length of zero.
       </li>
       <li>
+        <span class="param">exclude_cn_from_sans</span>
+        <span class="param-flags">optional</span>
+        If set, the given `common_name` will not be included in DNS or Email
+        Subject Alternate Names (as appropriate). Useful if the CN is not a
+        hostname or email address, but is instead some human-readable
+        identifier.
+      </li>
+      <li>
         <span class="param">use_csr_values</span>
         <span class="param-flags">optional</span>
         If set to `true`, then: 1) Subject information, including names and
@@ -1434,19 +1480,27 @@ subpath for interactive help output.
         valid if the role allows IP SANs (which is the default).
       </li>
       <li>
-      <span class="param">ttl</span>
-      <span class="param-flags">optional</span>
+        <span class="param">ttl</span>
+        <span class="param-flags">optional</span>
         Requested Time To Live. Cannot be greater than the role's `max_ttl`
         value. If not provided, the role's `ttl` value will be used. Note that
         the role values default to system values if not explicitly set.
       </li>
       <li>
-      <span class="param">format</span>
-      <span class="param-flags">optional</span>
+        <span class="param">format</span>
+        <span class="param-flags">optional</span>
         Format for returned data. Can be `pem`, `der`, or `pem_bundle`;
         defaults to `pem`. If `der`, the output is base64 encoded. If
         `pem_bundle`, the `certificate` field will contain the certificate and
         issuing CA, concatenated.
+      </li>
+      <li>
+        <span class="param">exclude_cn_from_sans</span>
+        <span class="param-flags">optional</span>
+        If set, the given `common_name` will not be included in DNS or Email
+        Subject Alternate Names (as appropriate). Useful if the CN is not a
+        hostname or email address, but is instead some human-readable
+        identifier.
       </li>
     </ul>
   </dd>
@@ -1534,5 +1588,55 @@ subpath for interactive help output.
     }
     ```
 
+  </dd>
+</dl>
+
+### /pki/tidy
+#### POST
+
+<dl class="api">
+  <dt>Description</dt>
+  <dd>
+    Allows tidying up the backend storage and/or CRL by removing certificates
+    that have expired and are past a certain buffer period beyond their
+    expiration time.
+  </dd>
+
+  <dt>Method</dt>
+  <dd>POST</dd>
+
+  <dt>URL</dt>
+  <dd>`/pki/tidy`</dd>
+
+  <dt>Parameters</dt>
+  <dd>
+    <ul>
+      <li>
+        <span class="param">tidy_cert_store</span>
+        <span class="param-flags">optional</span>
+        Whether to tidy up the certificate store. Defaults to `false`.
+      </li>
+      <li>
+      <span class="param">tidy_revocation_list</span>
+      <span class="param-flags">optional</span>
+        Whether to tidy up the revocation list (CRL). Defaults to `false`.
+      </li>
+      <li>
+      <span class="param">safety_buffer</span>
+      <span class="param-flags">optional</span>
+        A duration (given as an integer number of seconds or a string; defaults
+        to `72h`) used as a safety buffer to ensure certificates are not
+        expunged prematurely; as an example, this can keep certificates from
+        being removed from the CRL that, due to clock skew, might still be
+        considered valid on other hosts. For a certificate to be expunged, the
+        time must be after the expiration time of the certificate (according to
+        the local clock) plus the duration of `safety_buffer`.
+      </li>
+    </ul>
+  </dd>
+
+  <dt>Returns</dt>
+  <dd>
+    A `204` status code.
   </dd>
 </dl>

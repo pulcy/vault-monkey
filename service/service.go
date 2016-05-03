@@ -50,18 +50,28 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 	if err := config.ReadEnvironment(); err != nil {
 		return nil, maskAny(err)
 	}
+	var serverName string
 	if srvCfg.VaultAddr != "" {
-		log.Debug("Setting vault address to %s", srvCfg.VaultAddr)
+		log.Debugf("Setting vault address to %s", srvCfg.VaultAddr)
 		config.Address = srvCfg.VaultAddr
+		url, err := url.Parse(config.Address)
+		if err != nil {
+			return nil, maskAny(err)
+		}
+		host, _, err := net.SplitHostPort(url.Host)
+		if err != nil {
+			return nil, maskAny(err)
+		}
+		serverName = host
 	}
 	if srvCfg.VaultCACert != "" || srvCfg.VaultCAPath != "" {
 		var newCertPool *x509.CertPool
 		var err error
 		if srvCfg.VaultCACert != "" {
-			log.Debug("Loading CA cert: %s", srvCfg.VaultCACert)
+			log.Debugf("Loading CA cert: %s", srvCfg.VaultCACert)
 			newCertPool, err = api.LoadCACert(srvCfg.VaultCACert)
 		} else {
-			log.Debug("Loading CA certs from: %s", srvCfg.VaultCAPath)
+			log.Debugf("Loading CA certs from: %s", srvCfg.VaultCAPath)
 			newCertPool, err = api.LoadCAPath(srvCfg.VaultCAPath)
 		}
 		if err != nil {
@@ -69,10 +79,11 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 		}
 		clientTLSConfig := config.HttpClient.Transport.(*http.Transport).TLSClientConfig
 		clientTLSConfig.RootCAs = newCertPool
+		clientTLSConfig.ServerName = serverName
 	}
 	var token string
 	if srvCfg.TokenPath != "" {
-		log.Debug("Loading token from %s", srvCfg.TokenPath)
+		log.Debugf("Loading token from %s", srvCfg.TokenPath)
 		var err error
 		token, err = readID(srvCfg.TokenPath)
 		if err != nil {
