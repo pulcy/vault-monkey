@@ -28,7 +28,7 @@ type GithubLoginData struct {
 // GithubLogin performs a standard Github authentication and initializes the vaultClient with the resulting token.
 func (s *VaultService) GithubLogin(data GithubLoginData) error {
 	// Perform login
-	vaultClient, err := s.newClient()
+	vaultClient, err := s.newUnsealedClient()
 	if err != nil {
 		return maskAny(err)
 	}
