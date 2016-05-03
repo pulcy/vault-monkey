@@ -34,7 +34,7 @@ type Cluster struct {
 }
 
 func (vs *VaultService) Cluster() (*Cluster, error) {
-	vaultClient, err := vs.newClient()
+	vaultClient, err := vs.newUnsealedClient()
 	if err != nil {
 		return nil, maskAny(err)
 	}

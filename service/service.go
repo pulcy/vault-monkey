@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/hashicorp/vault/api"
+	"github.com/juju/errgo"
 	"github.com/op/go-logging"
 )
 
@@ -98,13 +99,23 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 	}, nil
 }
 
-// newClient creates a single vault client based on the configured vault address.
-func (s *VaultService) newClient() (*api.Client, error) {
-	client, err := newClientFromConfig(s.config, s.token)
+// newUnsealedClient creates the first single vault client that resolves to an unsealed vault instance.
+func (s *VaultService) newUnsealedClient() (*api.Client, error) {
+	clients, err := s.newClients()
 	if err != nil {
 		return nil, maskAny(err)
 	}
-	return client, nil
+	for _, client := range clients {
+		status, err := client.Client.Sys().SealStatus()
+		if err != nil {
+			s.log.Warningf("Vault at %s cannot be reached: %#v", client.Address, err)
+		} else if status.Sealed {
+			s.log.Warningf("Vault at %s is sealed", client.Address)
+		} else {
+			return client.Client, nil
+		}
+	}
+	return nil, maskAny(errgo.WithCausef(nil, VaultError, "no unsealed vault instance found"))
 }
 
 // newClients resolves the configured vault address into IP addresses and creates a one vault client

@@ -52,7 +52,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 
 	// Perform step 1 login
 	s.log.Debug("Step 1 login")
-	vaultClient, err := s.newClient()
+	vaultClient, err := s.newUnsealedClient()
 	if err != nil {
 		return maskAny(err)
 	}

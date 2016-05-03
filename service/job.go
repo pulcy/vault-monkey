@@ -32,7 +32,7 @@ type Job struct {
 }
 
 func (vs *VaultService) Job() (*Job, error) {
-	vaultClient, err := vs.newClient()
+	vaultClient, err := vs.newUnsealedClient()
 	if err != nil {
 		return nil, maskAny(err)
 	}
