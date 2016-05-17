@@ -148,16 +148,22 @@ func (s *VaultService) newClients() ([]VaultClient, error) {
 
 	// Create a client for each IP
 	list := []VaultClient{}
-	for _, ip := range ips {
-		ipURL := *url
-		ipURL.Host = net.JoinHostPort(ip.String(), port)
-		config := s.config
-		config.Address = ipURL.String()
-		client, err := newClientFromConfig(config, s.token)
-		if err != nil {
-			return nil, maskAny(err)
+	for j := 0; j < 2; j++ {
+		preferIPv6 := j == 0
+		for _, ip := range ips {
+			isIPv6 := ip.To4() == nil
+			if preferIPv6 == isIPv6 {
+				ipURL := *url
+				ipURL.Host = net.JoinHostPort(ip.String(), port)
+				config := s.config
+				config.Address = ipURL.String()
+				client, err := newClientFromConfig(config, s.token)
+				if err != nil {
+					return nil, maskAny(err)
+				}
+				list = append(list, VaultClient{Client: client, Address: config.Address})
+			}
 		}
-		list = append(list, VaultClient{Client: client, Address: config.Address})
 	}
 
 	return list, nil
