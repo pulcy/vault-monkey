@@ -79,6 +79,9 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	}
 
 	// Fetch user-id field
+	if userIdSecret == nil || userIdSecret.Data == nil {
+		return maskAny(errgo.WithCausef(nil, VaultError, "userIdSecret == nil at '%s'", userIdPath))
+	}
 	userId, ok := userIdSecret.Data[clusterAuthUserIdField]
 	if !ok {
 		return maskAny(errgo.WithCausef(nil, VaultError, "missing 'user-id' field at '%s'", userIdPath))
