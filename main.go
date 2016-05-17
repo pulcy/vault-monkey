@@ -38,18 +38,20 @@ const (
 	defaultLogLevel = "info"
 )
 
+type globalOptions struct {
+	logLevel string
+	service.VaultServiceConfig
+	ghToken string
+}
+
 var (
 	cmdMain = &cobra.Command{
 		Use:              projectName,
 		Run:              showUsage,
 		PersistentPreRun: func(*cobra.Command, []string) { setLogLevel(globalFlags.logLevel) },
 	}
-	globalFlags struct {
-		logLevel string
-		service.VaultServiceConfig
-		githubToken string
-	}
-	log = logging.MustGetLogger(cmdMain.Use)
+	globalFlags globalOptions
+	log         = logging.MustGetLogger(cmdMain.Use)
 )
 
 func init() {
@@ -62,7 +64,7 @@ func init() {
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultCACert, "vault-cacert", globalFlags.VaultCACert, "Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultCAPath, "vault-capath", globalFlags.VaultCAPath, "Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.TokenPath, "token-path", "", "Path of a file containing your vault token (token defaults to VAULT_TOKEN environment variable)")
-	cmdMain.PersistentFlags().StringVarP(&globalFlags.githubToken, "github-token", "G", "", "Personal github token for administrator logins")
+	cmdMain.PersistentFlags().StringVarP(&globalFlags.ghToken, "github-token", "G", "", "Personal github token for administrator logins")
 }
 
 func main() {
@@ -100,4 +102,11 @@ func setLogLevel(logLevel string) {
 		Exitf("Invalid log-level '%s': %#v", logLevel, err)
 	}
 	logging.SetLevel(level, projectName)
+}
+
+func (opt globalOptions) GithubToken() string {
+	if opt.ghToken != "" {
+		return opt.ghToken
+	}
+	return defaultGithubToken()
 }

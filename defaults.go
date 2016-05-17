@@ -15,25 +15,29 @@
 package main
 
 import (
-	"github.com/pulcy/vault-monkey/service"
+	"io/ioutil"
+	"os"
+	"strings"
+
+	"github.com/mitchellh/go-homedir"
 )
 
-// adminLogin initialized a VaultServices and tries to perform a administrator login (if needed).
-func adminLogin() (*service.VaultService, error) {
-	githubToken := globalFlags.GithubToken()
-	assertArgIsSet(githubToken, "-G")
-	// Create service
-	vs, err := service.NewVaultService(log, globalFlags.VaultServiceConfig)
+const (
+	defaultGithubTokenPathTmpl = "~/.pulcy/github-token"
+)
+
+func defaultGithubToken() string {
+	path, err := homedir.Expand(defaultGithubTokenPathTmpl)
 	if err != nil {
-		return nil, maskAny(err)
+		log.Warningf("Cannot expand %s: %#v", defaultGithubTokenPathTmpl, err)
+		return ""
 	}
-
-	// Login with github (if available)
-	if err := vs.GithubLogin(service.GithubLoginData{
-		GithubToken: githubToken,
-	}); err != nil {
-		return nil, maskAny(err)
+	content, err := ioutil.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	} else if err != nil {
+		log.Warningf("Cannot read %s: %#v", path, err)
+		return ""
 	}
-
-	return vs, nil
+	return strings.TrimSpace(string(content))
 }

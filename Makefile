@@ -54,6 +54,7 @@ update-vendor:
 		github.com/juju/errgo \
 		github.com/kardianos/osext \
 		github.com/kr/pretty \
+		github.com/mitchellh/go-homedir \
 		github.com/mitchellh/mapstructure \
 		github.com/op/go-logging \
 		github.com/ryanuber/columnize \
