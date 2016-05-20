@@ -52,6 +52,7 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 	var serverName, address string
 	if srvCfg.VaultAddr != "" {
 		address = srvCfg.VaultAddr
+		log.Debugf("Setting vault address to %s", address)
 		url, err := url.Parse(address)
 		if err != nil {
 			return nil, maskAny(err)
@@ -102,7 +103,6 @@ func (s *VaultService) newConfig() (*api.Config, error) {
 		return nil, maskAny(err)
 	}
 	if s.address != "" {
-		s.log.Debugf("Setting vault address to %s", s.address)
 		config.Address = s.address
 	}
 	if s.certPool != nil {
@@ -119,17 +119,29 @@ func (s *VaultService) newUnsealedClient() (*api.Client, string, error) {
 	if err != nil {
 		return nil, "", maskAny(err)
 	}
-	//defer close(unsealedClients)
 	for _, client := range clients {
+		// Check seal status
 		status, err := client.Client.Sys().SealStatus()
 		if err != nil {
 			s.log.Debugf("vault at %s cannot be reached: %s", client.Address, Describe(err))
+			continue
 		} else if status.Sealed {
 			s.log.Warningf("Vault at %s is sealed", client.Address)
-		} else {
-			s.log.Debugf("found unsealed vault client at %s", client.Address)
-			return client.Client, client.Address, nil
+			continue
 		}
+
+		// Check leader status
+		resp, err := client.Client.Sys().Leader()
+		if err != nil {
+			s.log.Debugf("vault at %s cannot be reached: %s", client.Address, Describe(err))
+			continue
+		} else if resp.HAEnabled && !resp.IsSelf {
+			s.log.Debugf("vault at %s is not the leader", client.Address)
+			continue
+		}
+
+		s.log.Debugf("found unsealed vault client at %s", client.Address)
+		return client.Client, client.Address, nil
 	}
 	return nil, "", maskAny(errgo.WithCausef(nil, VaultError, "no unsealed vault instance found"))
 }
@@ -153,6 +165,7 @@ func (s *VaultService) newClients() ([]VaultClient, error) {
 		if err != nil {
 			return nil, maskAny(err)
 		}
+		s.log.Debugf("fixed vault client at %s", config.Address)
 		client, err := newClientFromConfig(config, s.initialToken)
 		if err != nil {
 			return nil, maskAny(err)

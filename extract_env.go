@@ -56,7 +56,7 @@ func cmdExtractEnvRun(cmd *cobra.Command, args []string) {
 	// Login
 	c, err := serverLogin()
 	if err != nil {
-		Exitf("Login failed: %v", err)
+		Exitf("Login failed: %#v", err)
 	}
 
 	// Create env file
