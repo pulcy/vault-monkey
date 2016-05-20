@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/giantswarm/retry-go"
 )
 
 type EnvSecret struct {
@@ -30,14 +32,22 @@ type EnvSecret struct {
 
 // CreateEnvironmentFile extracts one or more secrets and creates a key=secretValue
 // environment file for them.
-func (s *VaultService) CreateEnvironmentFile(path string, secrets []EnvSecret) error {
+func (c *AuthenticatedVaultClient) CreateEnvironmentFile(path string, secrets []EnvSecret) error {
 	if err := ensureDirectoryOf(path, 0755); err != nil {
 		return maskAny(err)
 	}
 	lines := []string{}
 	for _, envSec := range secrets {
-		value, err := s.extractSecret(envSec.SecretPath, envSec.SecretField)
-		if err != nil {
+		var value string
+		op := func() error {
+			var err error
+			value, err = c.extractSecret(envSec.SecretPath, envSec.SecretField)
+			if err != nil {
+				return maskAny(err)
+			}
+			return nil
+		}
+		if err := retry.Do(op, retry.RetryChecker(IsVault), retry.MaxTries(3)); err != nil {
 			return maskAny(err)
 		}
 		line := fmt.Sprintf("%s=%s", envSec.EnvironmentKey, value)

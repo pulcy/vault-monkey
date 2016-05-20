@@ -67,9 +67,11 @@ func (s *VaultService) SealStatus() error {
 }
 
 // Seal seals the vault
-func (s *VaultService) Seal() error {
+func (s *VaultService) Seal(c *AuthenticatedVaultClient) error {
+	token := c.Token()
 	seal := func(client VaultClient) error {
 		s.log.Debugf("Sealing vault at %s", client.Address)
+		client.Client.SetToken(token)
 		if err := client.Client.Sys().Seal(); err != nil {
 			return maskAny(err)
 		}
@@ -86,6 +88,13 @@ func (s *VaultService) Seal() error {
 // If calls a given process several times to obtain unseal keys
 func (s *VaultService) Unseal(keyCmd []string) error {
 	unseal := func(client VaultClient) error {
+		status, err := client.Client.Sys().SealStatus()
+		if err != nil {
+			s.log.Warningf("cannot get seal status at %s", client.Address)
+		} else if !status.Sealed {
+			s.log.Infof("Vault at %s is already unsealed", client.Address)
+			return nil
+		}
 		if err := s.unseal(client, keyCmd); err != nil {
 			return maskAny(err)
 		}

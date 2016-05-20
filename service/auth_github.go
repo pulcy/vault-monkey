@@ -26,11 +26,11 @@ type GithubLoginData struct {
 }
 
 // GithubLogin performs a standard Github authentication and initializes the vaultClient with the resulting token.
-func (s *VaultService) GithubLogin(data GithubLoginData) error {
+func (s *VaultService) GithubLogin(data GithubLoginData) (*AuthenticatedVaultClient, error) {
 	// Perform login
-	vaultClient, err := s.newUnsealedClient()
+	vaultClient, address, err := s.newUnsealedClient()
 	if err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	}
 	vaultClient.ClearToken()
 	logical := vaultClient.Logical()
@@ -40,15 +40,16 @@ func (s *VaultService) GithubLogin(data GithubLoginData) error {
 		data.Mount = "github"
 	}
 	path := fmt.Sprintf("auth/%s/login", data.Mount)
+	s.log.Debugf("write loginData at %s", address)
 	if loginSecret, err := logical.Write(path, loginData); err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	} else if loginSecret.Auth == nil {
-		return maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in secret response"))
+		return nil, maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in secret response"))
 	} else {
 		// Use token
-		s.token = loginSecret.Auth.ClientToken
+		vaultClient.SetToken(loginSecret.Auth.ClientToken)
 	}
 
 	// We're done
-	return nil
+	return s.newAuthenticatedClient(vaultClient), nil
 }

@@ -15,6 +15,8 @@
 package service
 
 import (
+	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/juju/errgo"
@@ -23,8 +25,17 @@ import (
 var (
 	InvalidArgumentError = errgo.New("invalid argument")
 	VaultError           = errgo.New("vault error")
+	SecretNotFoundError  = errgo.New("secret not found")
 	maskAny              = errgo.MaskFunc(errgo.Any)
 )
+
+func IsVault(err error) bool {
+	return errgo.Cause(err) == VaultError
+}
+
+func IsSecretNotFound(err error) bool {
+	return errgo.Cause(err) == SecretNotFoundError
+}
 
 type AggregateError struct {
 	errors []error
@@ -53,4 +64,11 @@ func (ae *AggregateError) Error() string {
 		l = append(l, err.Error())
 	}
 	return strings.Join(l, ", ")
+}
+
+func Describe(err error) string {
+	if urlErr, ok := err.(*url.Error); ok {
+		return fmt.Sprintf("Op=%s, URL=%s, Error=%s (%#v)", urlErr.Op, urlErr.URL, urlErr.Err.Error(), err)
+	}
+	return err.Error()
 }

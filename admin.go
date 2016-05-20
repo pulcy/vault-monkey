@@ -19,21 +19,22 @@ import (
 )
 
 // adminLogin initialized a VaultServices and tries to perform a administrator login (if needed).
-func adminLogin() (*service.VaultService, error) {
+func adminLogin() (*service.VaultService, *service.AuthenticatedVaultClient, error) {
 	githubToken := globalFlags.GithubToken()
 	assertArgIsSet(githubToken, "-G")
 	// Create service
 	vs, err := service.NewVaultService(log, globalFlags.VaultServiceConfig)
 	if err != nil {
-		return nil, maskAny(err)
+		return nil, nil, maskAny(err)
 	}
 
 	// Login with github (if available)
-	if err := vs.GithubLogin(service.GithubLoginData{
+	c, err := vs.GithubLogin(service.GithubLoginData{
 		GithubToken: githubToken,
-	}); err != nil {
-		return nil, maskAny(err)
+	})
+	if err != nil {
+		return nil, nil, maskAny(err)
 	}
 
-	return vs, nil
+	return vs, c, nil
 }

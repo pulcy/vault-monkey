@@ -54,13 +54,13 @@ func cmdExtractEnvRun(cmd *cobra.Command, args []string) {
 	}
 
 	// Login
-	vs, err := serverLogin()
+	c, err := serverLogin()
 	if err != nil {
 		Exitf("Login failed: %v", err)
 	}
 
 	// Create env file
-	if err := vs.CreateEnvironmentFile(extractFlags.targetFilePath, secrets); err != nil {
+	if err := c.CreateEnvironmentFile(extractFlags.targetFilePath, secrets); err != nil {
 		Exitf("Secret extraction failed: %v", err)
 	}
 }

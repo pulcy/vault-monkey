@@ -12,30 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package service
 
 import (
-	"github.com/spf13/cobra"
+	"github.com/hashicorp/vault/api"
+	"github.com/op/go-logging"
 )
 
-var (
-	cmdSeal = &cobra.Command{
-		Use:   "seal",
-		Short: "Seal the vault.",
-		Run:   cmdSealRun,
-	}
-)
-
-func init() {
-	cmdMain.AddCommand(cmdSeal)
+type AuthenticatedVaultClient struct {
+	log         *logging.Logger
+	vaultClient *api.Client
 }
 
-func cmdSealRun(cmd *cobra.Command, args []string) {
-	vs, c, err := adminLogin()
-	if err != nil {
-		Exitf("Failed to create vault service: %#v", err)
-	}
-	if err := vs.Seal(c); err != nil {
-		Exitf("Failed to seal vault: %#v", err)
-	}
+func (c *AuthenticatedVaultClient) Cluster() Cluster {
+	return Cluster{vaultClient: c.vaultClient}
+}
+
+func (c *AuthenticatedVaultClient) Job() Job {
+	return Job{vaultClient: c.vaultClient}
+}
+
+func (c *AuthenticatedVaultClient) Token() string {
+	return c.vaultClient.Token()
 }

@@ -35,7 +35,7 @@ var (
 
 const (
 	projectName     = "vault-monkey"
-	defaultLogLevel = "info"
+	defaultLogLevel = "debug"
 )
 
 type globalOptions struct {

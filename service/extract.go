@@ -20,7 +20,7 @@ import (
 
 // extractSecret extracts a secret based on given variables
 // Call a login method before calling this method.
-func (s *VaultService) extractSecret(secretPath, secretField string) (string, error) {
+func (c *AuthenticatedVaultClient) extractSecret(secretPath, secretField string) (string, error) {
 	if secretPath == "" {
 		return "", maskAny(errgo.WithCausef(nil, InvalidArgumentError, "path not set"))
 	}
@@ -29,21 +29,17 @@ func (s *VaultService) extractSecret(secretPath, secretField string) (string, er
 	}
 
 	// Load secret
-	s.log.Infof("Read %s#%s", secretPath, secretField)
-	vaultClient, err := s.newUnsealedClient()
-	if err != nil {
-		return "", maskAny(err)
-	}
-	secret, err := vaultClient.Logical().Read(secretPath)
+	c.log.Infof("Read %s#%s", secretPath, secretField)
+	secret, err := c.vaultClient.Logical().Read(secretPath)
 	if err != nil {
 		return "", maskAny(errgo.WithCausef(nil, VaultError, "error reading %s: %s", secretPath, err))
 	}
 	if secret == nil {
-		return "", maskAny(errgo.WithCausef(nil, VaultError, "no value found at %s", secretPath))
+		return "", maskAny(errgo.WithCausef(nil, SecretNotFoundError, "no value found at %s", secretPath))
 	}
 
 	if value, ok := secret.Data[secretField]; !ok {
-		return "", maskAny(errgo.WithCausef(nil, VaultError, "no field '%s' found at %s", secretField, secretPath))
+		return "", maskAny(errgo.WithCausef(nil, SecretNotFoundError, "no field '%s' found at %s", secretField, secretPath))
 	} else {
 		return value.(string), nil
 	}

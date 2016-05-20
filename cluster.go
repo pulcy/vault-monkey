@@ -71,15 +71,12 @@ func init() {
 func cmdClusterCreateRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(clusterFlags.clusterID, "cluster-id")
 
-	vs, err := adminLogin()
+	_, c, err := adminLogin()
 	if err != nil {
 		Exitf("Login failed: %v", err)
 	}
 
-	cluster, err := vs.Cluster()
-	if err != nil {
-		Exitf("Client creation failed: %v", err)
-	}
+	cluster := c.Cluster()
 	if err := cluster.Create(clusterFlags.clusterID); err != nil {
 		Exitf("Failed to create cluster: %v", err)
 	}
@@ -88,15 +85,12 @@ func cmdClusterCreateRun(cmd *cobra.Command, args []string) {
 func cmdClusterDeleteRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(clusterFlags.clusterID, "cluster-id")
 
-	vs, err := adminLogin()
+	_, c, err := adminLogin()
 	if err != nil {
 		Exitf("Login failed: %v", err)
 	}
 
-	cluster, err := vs.Cluster()
-	if err != nil {
-		Exitf("Client creation failed: %v", err)
-	}
+	cluster := c.Cluster()
 	if err := cluster.Delete(clusterFlags.clusterID); err != nil {
 		Exitf("Failed to create cluster: %v", err)
 	}
@@ -106,15 +100,12 @@ func cmdClusterAddMachineRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(clusterFlags.clusterID, "cluster-id")
 	assertArgIsSet(clusterFlags.machineID, "machine-id")
 
-	vs, err := adminLogin()
+	_, c, err := adminLogin()
 	if err != nil {
 		Exitf("Login failed: %v", err)
 	}
 
-	cluster, err := vs.Cluster()
-	if err != nil {
-		Exitf("Client creation failed: %v", err)
-	}
+	cluster := c.Cluster()
 	if err := cluster.AddMachine(clusterFlags.clusterID, clusterFlags.machineID, clusterFlags.cidrBlock); err != nil {
 		Exitf("Failed to add machine to cluster: %v", err)
 	}
@@ -123,15 +114,12 @@ func cmdClusterAddMachineRun(cmd *cobra.Command, args []string) {
 func cmdClusterRemoveMachineRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(clusterFlags.machineID, "machine-id")
 
-	vs, err := adminLogin()
+	_, c, err := adminLogin()
 	if err != nil {
 		Exitf("Login failed: %v", err)
 	}
 
-	cluster, err := vs.Cluster()
-	if err != nil {
-		Exitf("Client creation failed: %v", err)
-	}
+	cluster := c.Cluster()
 	if err := cluster.RemoveMachine(clusterFlags.machineID); err != nil {
 		Exitf("Failed to remove machine from cluster: %v", err)
 	}

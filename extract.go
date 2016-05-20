@@ -49,7 +49,7 @@ func init() {
 }
 
 // serverLogin initialized a VaultServices and tries to perform a server login.
-func serverLogin() (*service.VaultService, error) {
+func serverLogin() (*service.AuthenticatedVaultClient, error) {
 	// Check arguments
 	if extractFlags.JobID == "" {
 		return nil, maskAny(fmt.Errorf("--job-id missing"))
@@ -68,8 +68,9 @@ func serverLogin() (*service.VaultService, error) {
 	}
 
 	// Perform server login
-	if err := vs.ServerLogin(extractFlags.ServerLoginData); err != nil {
+	c, err := vs.ServerLogin(extractFlags.ServerLoginData)
+	if err != nil {
 		return nil, maskAny(err)
 	}
-	return vs, nil
+	return c, nil
 }

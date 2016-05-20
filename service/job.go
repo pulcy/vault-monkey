@@ -31,14 +31,6 @@ type Job struct {
 	vaultClient *api.Client
 }
 
-func (vs *VaultService) Job() (*Job, error) {
-	vaultClient, err := vs.newUnsealedClient()
-	if err != nil {
-		return nil, maskAny(err)
-	}
-	return &Job{vaultClient: vaultClient}, nil
-}
-
 // Create creates the app-id mapping for a job with given id.
 func (c *Job) Create(jobId, policyName string) error {
 	jobId = strings.ToLower(jobId)

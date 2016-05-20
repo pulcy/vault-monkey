@@ -36,55 +36,56 @@ type ServerLoginData struct {
 }
 
 // ServerLogin performs a 2-step login and initializes the vaultClient with the resulting token.
-func (s *VaultService) ServerLogin(data ServerLoginData) error {
+func (s *VaultService) ServerLogin(data ServerLoginData) (*AuthenticatedVaultClient, error) {
 	// Read data
 	clusterID, err := readID(data.ClusterIDPath)
 	if err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	}
 	clusterID = strings.ToLower(clusterID)
 	machineID, err := readID(data.MachineIDPath)
 	if err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	}
 	machineID = strings.ToLower(machineID)
 	jobID := strings.ToLower(data.JobID)
 
 	// Perform step 1 login
 	s.log.Debug("Step 1 login")
-	vaultClient, err := s.newUnsealedClient()
+	vaultClient, address, err := s.newUnsealedClient()
 	if err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	}
 	vaultClient.ClearToken()
 	logical := vaultClient.Logical()
 	step1Data := make(map[string]interface{})
 	step1Data["app_id"] = clusterID
 	step1Data["user_id"] = machineID
+	s.log.Debugf("write step1Data to %s", address)
 	if loginSecret, err := logical.Write("auth/app-id/login", step1Data); err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	} else if loginSecret.Auth == nil {
-		return maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in step 1 secret response"))
+		return nil, maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in step 1 secret response"))
 	} else {
 		// Use step1 token
 		vaultClient.SetToken(loginSecret.Auth.ClientToken)
 	}
 
 	// Read cluster/job specific user-id
-	s.log.Debug("Fetch cluster+job specific user-id")
+	s.log.Debugf("Fetch cluster+job specific user-id at %s", address)
 	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterID, jobID)
 	userIdSecret, err := logical.Read(userIdPath)
 	if err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	}
 
 	// Fetch user-id field
 	if userIdSecret == nil || userIdSecret.Data == nil {
-		return maskAny(errgo.WithCausef(nil, VaultError, "userIdSecret == nil at '%s'", userIdPath))
+		return nil, maskAny(errgo.WithCausef(nil, VaultError, "userIdSecret == nil at '%s'", userIdPath))
 	}
 	userId, ok := userIdSecret.Data[clusterAuthUserIdField]
 	if !ok {
-		return maskAny(errgo.WithCausef(nil, VaultError, "missing 'user-id' field at '%s'", userIdPath))
+		return nil, maskAny(errgo.WithCausef(nil, VaultError, "missing 'user-id' field at '%s'", userIdPath))
 	}
 
 	// Perform step 2 login
@@ -94,16 +95,16 @@ func (s *VaultService) ServerLogin(data ServerLoginData) error {
 	step2Data["app_id"] = jobID
 	step2Data["user_id"] = userId
 	if loginSecret, err := logical.Write("auth/app-id/login", step2Data); err != nil {
-		return maskAny(err)
+		return nil, maskAny(err)
 	} else if loginSecret.Auth == nil {
-		return maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in step 2 secret response"))
+		return nil, maskAny(errgo.WithCausef(nil, VaultError, "missing authentication in step 2 secret response"))
 	} else {
 		// Use step2 token
-		s.token = loginSecret.Auth.ClientToken
+		vaultClient.SetToken(loginSecret.Auth.ClientToken)
 	}
 
 	// We're done
-	return nil
+	return s.newAuthenticatedClient(vaultClient), nil
 }
 
 // readID read an id from a file with given path.

@@ -33,14 +33,6 @@ type Cluster struct {
 	vaultClient *api.Client
 }
 
-func (vs *VaultService) Cluster() (*Cluster, error) {
-	vaultClient, err := vs.newUnsealedClient()
-	if err != nil {
-		return nil, maskAny(err)
-	}
-	return &Cluster{vaultClient: vaultClient}, nil
-}
-
 // Create creates the app-id mapping for a cluster with given id.
 // It also creates and uses a policy for accessing only the jobs within the cluster.
 func (c *Cluster) Create(clusterId string) error {

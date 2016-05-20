@@ -16,6 +16,8 @@ package service
 
 import (
 	"io/ioutil"
+
+	"github.com/giantswarm/retry-go"
 )
 
 type FileSecret struct {
@@ -25,12 +27,20 @@ type FileSecret struct {
 
 // CreateSecretFile extracts one secret and creates a file containing
 // the secret value.
-func (s *VaultService) CreateSecretFile(path string, secret FileSecret) error {
+func (c *AuthenticatedVaultClient) CreateSecretFile(path string, secret FileSecret) error {
 	if err := ensureDirectoryOf(path, 0755); err != nil {
 		return maskAny(err)
 	}
-	value, err := s.extractSecret(secret.SecretPath, secret.SecretField)
-	if err != nil {
+	var value string
+	op := func() error {
+		var err error
+		value, err = c.extractSecret(secret.SecretPath, secret.SecretField)
+		if err != nil {
+			return maskAny(err)
+		}
+		return nil
+	}
+	if err := retry.Do(op, retry.RetryChecker(IsVault), retry.MaxTries(3)); err != nil {
 		return maskAny(err)
 	}
 	if err := ioutil.WriteFile(path, []byte(value), 0400); err != nil {

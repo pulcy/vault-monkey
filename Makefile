@@ -49,6 +49,7 @@ update-vendor:
 	@rm -Rf $(VENDORDIR)
 	@pulsar go vendor -V $(VENDORDIR) \
 		github.com/dchest/uniuri \
+		github.com/giantswarm/retry-go \
 		github.com/hashicorp/hcl \
 		github.com/hashicorp/vault/api \
 		github.com/juju/errgo \

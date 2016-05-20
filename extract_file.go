@@ -50,7 +50,7 @@ func cmdExtractFileRun(cmd *cobra.Command, args []string) {
 	}
 
 	// Login
-	vs, err := serverLogin()
+	c, err := serverLogin()
 	if err != nil {
 		Exitf("Login failed: %v", err)
 	}
@@ -60,7 +60,7 @@ func cmdExtractFileRun(cmd *cobra.Command, args []string) {
 		SecretPath:  secretPath,
 		SecretField: secretField,
 	}
-	if err := vs.CreateSecretFile(extractFlags.targetFilePath, secret); err != nil {
+	if err := c.CreateSecretFile(extractFlags.targetFilePath, secret); err != nil {
 		Exitf("Secret extraction failed: %v", err)
 	}
 }

@@ -34,9 +34,11 @@ type VaultServiceConfig struct {
 }
 
 type VaultService struct {
-	log    *logging.Logger
-	config api.Config
-	token  string
+	log          *logging.Logger
+	address      string
+	serverName   string
+	initialToken string
+	certPool     *x509.CertPool
 }
 
 type VaultClient struct {
@@ -47,15 +49,10 @@ type VaultClient struct {
 // NewVaultService creates a new VaultService and loads its configuration from the given settings.
 func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultService, error) {
 	// Create a vault client
-	config := api.DefaultConfig()
-	if err := config.ReadEnvironment(); err != nil {
-		return nil, maskAny(err)
-	}
-	var serverName string
+	var serverName, address string
 	if srvCfg.VaultAddr != "" {
-		log.Debugf("Setting vault address to %s", srvCfg.VaultAddr)
-		config.Address = srvCfg.VaultAddr
-		url, err := url.Parse(config.Address)
+		address = srvCfg.VaultAddr
+		url, err := url.Parse(address)
 		if err != nil {
 			return nil, maskAny(err)
 		}
@@ -65,8 +62,8 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 		}
 		serverName = host
 	}
+	var newCertPool *x509.CertPool
 	if srvCfg.VaultCACert != "" || srvCfg.VaultCAPath != "" {
-		var newCertPool *x509.CertPool
 		var err error
 		if srvCfg.VaultCACert != "" {
 			log.Debugf("Loading CA cert: %s", srvCfg.VaultCACert)
@@ -78,9 +75,6 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 		if err != nil {
 			return nil, maskAny(err)
 		}
-		clientTLSConfig := config.HttpClient.Transport.(*http.Transport).TLSClientConfig
-		clientTLSConfig.RootCAs = newCertPool
-		clientTLSConfig.ServerName = serverName
 	}
 	var token string
 	if srvCfg.TokenPath != "" {
@@ -93,35 +87,57 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 	}
 
 	return &VaultService{
-		log:    log,
-		config: *config,
-		token:  token,
+		log:          log,
+		address:      address,
+		serverName:   serverName,
+		initialToken: token,
+		certPool:     newCertPool,
 	}, nil
 }
 
-// newUnsealedClient creates the first single vault client that resolves to an unsealed vault instance.
-func (s *VaultService) newUnsealedClient() (*api.Client, error) {
-	clients, err := s.newClients()
-	if err != nil {
+func (s *VaultService) newConfig() (*api.Config, error) {
+	// Create a vault client
+	config := api.DefaultConfig()
+	if err := config.ReadEnvironment(); err != nil {
 		return nil, maskAny(err)
 	}
+	if s.address != "" {
+		s.log.Debugf("Setting vault address to %s", s.address)
+		config.Address = s.address
+	}
+	if s.certPool != nil {
+		clientTLSConfig := config.HttpClient.Transport.(*http.Transport).TLSClientConfig
+		clientTLSConfig.RootCAs = s.certPool
+		clientTLSConfig.ServerName = s.serverName
+	}
+	return config, nil
+}
+
+// newUnsealedClient creates the first single vault client that resolves to an unsealed vault instance.
+func (s *VaultService) newUnsealedClient() (*api.Client, string, error) {
+	clients, err := s.newClients()
+	if err != nil {
+		return nil, "", maskAny(err)
+	}
+	//defer close(unsealedClients)
 	for _, client := range clients {
 		status, err := client.Client.Sys().SealStatus()
 		if err != nil {
-			s.log.Warningf("Vault at %s cannot be reached: %#v", client.Address, err)
+			s.log.Debugf("vault at %s cannot be reached: %s", client.Address, Describe(err))
 		} else if status.Sealed {
 			s.log.Warningf("Vault at %s is sealed", client.Address)
 		} else {
-			return client.Client, nil
+			s.log.Debugf("found unsealed vault client at %s", client.Address)
+			return client.Client, client.Address, nil
 		}
 	}
-	return nil, maskAny(errgo.WithCausef(nil, VaultError, "no unsealed vault instance found"))
+	return nil, "", maskAny(errgo.WithCausef(nil, VaultError, "no unsealed vault instance found"))
 }
 
 // newClients resolves the configured vault address into IP addresses and creates a one vault client
 // for each IP address.
 func (s *VaultService) newClients() ([]VaultClient, error) {
-	url, err := url.Parse(s.config.Address)
+	url, err := url.Parse(s.address)
 	if err != nil {
 		return nil, maskAny(err)
 	}
@@ -133,11 +149,15 @@ func (s *VaultService) newClients() ([]VaultClient, error) {
 	ip := net.ParseIP(host)
 	if ip != nil {
 		// Yes, host address is an IP
-		client, err := newClientFromConfig(s.config, s.token)
+		config, err := s.newConfig()
 		if err != nil {
 			return nil, maskAny(err)
 		}
-		return []VaultClient{VaultClient{Client: client, Address: s.config.Address}}, nil
+		client, err := newClientFromConfig(config, s.initialToken)
+		if err != nil {
+			return nil, maskAny(err)
+		}
+		return []VaultClient{VaultClient{Client: client, Address: config.Address}}, nil
 	}
 
 	// Get IP's for host address
@@ -155,13 +175,17 @@ func (s *VaultService) newClients() ([]VaultClient, error) {
 			if preferIPv6 == isIPv6 {
 				ipURL := *url
 				ipURL.Host = net.JoinHostPort(ip.String(), port)
-				config := s.config
+				config, err := s.newConfig()
+				if err != nil {
+					return nil, maskAny(err)
+				}
 				config.Address = ipURL.String()
-				client, err := newClientFromConfig(config, s.token)
+				client, err := newClientFromConfig(config, s.initialToken)
 				if err != nil {
 					return nil, maskAny(err)
 				}
 				list = append(list, VaultClient{Client: client, Address: config.Address})
+				s.log.Debugf("possible vault client at %s", config.Address)
 			}
 		}
 	}
@@ -169,8 +193,8 @@ func (s *VaultService) newClients() ([]VaultClient, error) {
 	return list, nil
 }
 
-func newClientFromConfig(config api.Config, token string) (*api.Client, error) {
-	client, err := api.NewClient(&config)
+func newClientFromConfig(config *api.Config, token string) (*api.Client, error) {
+	client, err := api.NewClient(config)
 	if err != nil {
 		return nil, maskAny(err)
 	}
@@ -207,4 +231,8 @@ func (s *VaultService) asyncForEachClient(f func(client VaultClient) error) erro
 	}
 
 	return nil
+}
+
+func (s *VaultService) newAuthenticatedClient(vaultClient *api.Client) *AuthenticatedVaultClient {
+	return &AuthenticatedVaultClient{log: s.log, vaultClient: vaultClient}
 }
