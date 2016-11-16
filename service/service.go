@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"sync"
 
+	rootcerts "github.com/hashicorp/go-rootcerts"
 	"github.com/hashicorp/vault/api"
 	"github.com/juju/errgo"
 	"github.com/op/go-logging"
@@ -68,10 +69,10 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 		var err error
 		if srvCfg.VaultCACert != "" {
 			log.Debugf("Loading CA cert: %s", srvCfg.VaultCACert)
-			newCertPool, err = api.LoadCACert(srvCfg.VaultCACert)
+			newCertPool, err = rootcerts.LoadCAFile(srvCfg.VaultCACert)
 		} else {
 			log.Debugf("Loading CA certs from: %s", srvCfg.VaultCAPath)
-			newCertPool, err = api.LoadCAPath(srvCfg.VaultCAPath)
+			newCertPool, err = rootcerts.LoadCAPath(srvCfg.VaultCAPath)
 		}
 		if err != nil {
 			return nil, maskAny(err)

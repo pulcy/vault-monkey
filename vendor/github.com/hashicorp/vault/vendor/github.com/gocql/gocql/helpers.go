@@ -37,6 +37,10 @@ func goType(t TypeInfo) reflect.Type {
 		return reflect.TypeOf(*new(float64))
 	case TypeInt:
 		return reflect.TypeOf(*new(int))
+	case TypeSmallInt:
+		return reflect.TypeOf(*new(int16))
+	case TypeTinyInt:
+		return reflect.TypeOf(*new(int8))
 	case TypeDecimal:
 		return reflect.TypeOf(*new(*inf.Dec))
 	case TypeUUID, TypeTimeUUID:
@@ -136,6 +140,10 @@ func getApacheCassandraType(class string) Type {
 		return TypeFloat
 	case "Int32Type":
 		return TypeInt
+	case "ShortType":
+		return TypeSmallInt
+	case "ByteType":
+		return TypeTinyInt
 	case "DateType", "TimestampType":
 		return TypeTimestamp
 	case "UUIDType", "LexicalUUIDType":
@@ -241,7 +249,7 @@ func (iter *Iter) SliceMap() ([]map[string]interface{}, error) {
 }
 
 // MapScan takes a map[string]interface{} and populates it with a row
-// That is returned from cassandra.
+// that is returned from cassandra.
 func (iter *Iter) MapScan(m map[string]interface{}) bool {
 	if iter.err != nil {
 		return false

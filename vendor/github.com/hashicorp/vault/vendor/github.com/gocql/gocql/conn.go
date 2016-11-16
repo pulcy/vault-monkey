@@ -113,7 +113,7 @@ func (fn connErrorHandlerFn) HandleError(conn *Conn, err error, closed bool) {
 	fn(conn, err, closed)
 }
 
-// How many timeouts we will allow to occur before the connection is closed
+// If not zero, how many timeouts we will allow to occur before the connection is closed
 // and restarted. This is to prevent a single query timeout from killing a connection
 // which may be serving more queries just fine.
 // Default is 10, should not be changed concurrently with queries.
@@ -152,8 +152,15 @@ type Conn struct {
 }
 
 // Connect establishes a connection to a Cassandra node.
-func Connect(host *HostInfo, addr string, cfg *ConnConfig,
-	errorHandler ConnErrorHandler, session *Session) (*Conn, error) {
+func Connect(host *HostInfo, cfg *ConnConfig, errorHandler ConnErrorHandler, session *Session) (*Conn, error) {
+	// TODO(zariel): remove these
+	if host == nil {
+		panic("host is nil")
+	} else if len(host.Peer()) == 0 {
+		panic("host missing peer ip address")
+	} else if host.Port() == 0 {
+		panic("host missing port")
+	}
 
 	var (
 		err  error
@@ -163,6 +170,9 @@ func Connect(host *HostInfo, addr string, cfg *ConnConfig,
 	dialer := &net.Dialer{
 		Timeout: cfg.Timeout,
 	}
+
+	// TODO(zariel): handle ipv6 zone
+	addr := (&net.TCPAddr{IP: host.Peer(), Port: host.Port()}).String()
 
 	if cfg.tlsConfig != nil {
 		// the TLS config is safe to be reused by connections but it must not
@@ -430,6 +440,17 @@ func (c *Conn) discardFrame(head frameHeader) error {
 	return nil
 }
 
+type protocolError struct {
+	frame frame
+}
+
+func (p *protocolError) Error() string {
+	if err, ok := p.frame.(error); ok {
+		return err.Error()
+	}
+	return fmt.Sprintf("gocql: received unexpected frame on stream %d: %v", p.frame.Header().stream, p.frame)
+}
+
 func (c *Conn) recv() error {
 	// not safe for concurrent reads
 
@@ -469,11 +490,8 @@ func (c *Conn) recv() error {
 			return err
 		}
 
-		switch v := frame.(type) {
-		case error:
-			return fmt.Errorf("gocql: error on stream %d: %v", head.stream, v)
-		default:
-			return fmt.Errorf("gocql: received frame on stream %d: %v", head.stream, frame)
+		return &protocolError{
+			frame: frame,
 		}
 	}
 
@@ -522,7 +540,7 @@ func (c *Conn) releaseStream(stream int) {
 }
 
 func (c *Conn) handleTimeout() {
-	if atomic.AddInt64(&c.timeouts, 1) > TimeoutLimit {
+	if TimeoutLimit > 0 && atomic.AddInt64(&c.timeouts, 1) > TimeoutLimit {
 		c.closeWithError(ErrTooManyTimeouts)
 	}
 }
@@ -794,7 +812,7 @@ func (c *Conn) executeQuery(qry *Query) *Iter {
 			// TODO: handle query binding names
 		}
 
-		params.skipMeta = !qry.disableSkipMetadata
+		params.skipMeta = !(c.session.cfg.DisableSkipMetadata || qry.disableSkipMetadata)
 
 		frame = &writeExecuteFrame{
 			preparedID: info.id,

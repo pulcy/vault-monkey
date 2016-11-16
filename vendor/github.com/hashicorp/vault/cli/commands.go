@@ -5,10 +5,11 @@ import (
 
 	auditFile "github.com/hashicorp/vault/builtin/audit/file"
 	auditSyslog "github.com/hashicorp/vault/builtin/audit/syslog"
-	"github.com/hashicorp/vault/command/server"
 	"github.com/hashicorp/vault/version"
 
 	credAppId "github.com/hashicorp/vault/builtin/credential/app-id"
+	credAppRole "github.com/hashicorp/vault/builtin/credential/approle"
+	credAwsEc2 "github.com/hashicorp/vault/builtin/credential/aws-ec2"
 	credCert "github.com/hashicorp/vault/builtin/credential/cert"
 	credGitHub "github.com/hashicorp/vault/builtin/credential/github"
 	credLdap "github.com/hashicorp/vault/builtin/credential/ldap"
@@ -17,10 +18,12 @@ import (
 	"github.com/hashicorp/vault/builtin/logical/aws"
 	"github.com/hashicorp/vault/builtin/logical/cassandra"
 	"github.com/hashicorp/vault/builtin/logical/consul"
+	"github.com/hashicorp/vault/builtin/logical/mongodb"
 	"github.com/hashicorp/vault/builtin/logical/mssql"
 	"github.com/hashicorp/vault/builtin/logical/mysql"
 	"github.com/hashicorp/vault/builtin/logical/pki"
 	"github.com/hashicorp/vault/builtin/logical/postgresql"
+	"github.com/hashicorp/vault/builtin/logical/rabbitmq"
 	"github.com/hashicorp/vault/builtin/logical/ssh"
 	"github.com/hashicorp/vault/builtin/logical/transit"
 
@@ -62,7 +65,9 @@ func Commands(metaPtr *meta.Meta) map[string]cli.CommandFactory {
 					"syslog": auditSyslog.Factory,
 				},
 				CredentialBackends: map[string]logical.Factory{
+					"approle":  credAppRole.Factory,
 					"cert":     credCert.Factory,
+					"aws-ec2":  credAwsEc2.Factory,
 					"app-id":   credAppId.Factory,
 					"github":   credGitHub.Factory,
 					"userpass": credUserpass.Factory,
@@ -75,13 +80,14 @@ func Commands(metaPtr *meta.Meta) map[string]cli.CommandFactory {
 					"cassandra":  cassandra.Factory,
 					"pki":        pki.Factory,
 					"transit":    transit.Factory,
+					"mongodb":    mongodb.Factory,
 					"mssql":      mssql.Factory,
 					"mysql":      mysql.Factory,
 					"ssh":        ssh.Factory,
+					"rabbitmq":   rabbitmq.Factory,
 				},
-				ShutdownCh:  command.MakeShutdownCh(),
-				SighupCh:    command.MakeSighupCh(),
-				ReloadFuncs: map[string][]server.ReloadFunc{},
+				ShutdownCh: command.MakeShutdownCh(),
+				SighupCh:   command.MakeSighupCh(),
 			}, nil
 		},
 
@@ -165,6 +171,12 @@ func Commands(metaPtr *meta.Meta) map[string]cli.CommandFactory {
 
 		"read": func() (cli.Command, error) {
 			return &command.ReadCommand{
+				Meta: *metaPtr,
+			}, nil
+		},
+
+		"unwrap": func() (cli.Command, error) {
+			return &command.UnwrapCommand{
 				Meta: *metaPtr,
 			}, nil
 		},

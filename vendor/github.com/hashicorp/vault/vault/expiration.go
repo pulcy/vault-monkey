@@ -3,15 +3,16 @@ package vault
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"path"
 	"strings"
 	"sync"
 	"time"
 
+	log "github.com/mgutz/logxi/v1"
+
 	"github.com/armon/go-metrics"
 	"github.com/hashicorp/go-uuid"
+	"github.com/hashicorp/vault/helper/jsonutil"
 	"github.com/hashicorp/vault/logical"
 )
 
@@ -36,7 +37,7 @@ const (
 	minRevokeDelay = 5 * time.Second
 
 	// maxLeaseDuration is the default maximum lease duration
-	maxLeaseTTL = 30 * 24 * time.Hour
+	maxLeaseTTL = 32 * 24 * time.Hour
 
 	// defaultLeaseDuration is the default lease duration used when no lease is specified
 	defaultLeaseTTL = maxLeaseTTL
@@ -51,7 +52,7 @@ type ExpirationManager struct {
 	idView     *BarrierView
 	tokenView  *BarrierView
 	tokenStore *TokenStore
-	logger     *log.Logger
+	logger     log.Logger
 
 	pending     map[string]*time.Timer
 	pendingLock sync.Mutex
@@ -59,9 +60,10 @@ type ExpirationManager struct {
 
 // NewExpirationManager creates a new ExpirationManager that is backed
 // using a given view, and uses the provided router for revocation.
-func NewExpirationManager(router *Router, view *BarrierView, ts *TokenStore, logger *log.Logger) *ExpirationManager {
+func NewExpirationManager(router *Router, view *BarrierView, ts *TokenStore, logger log.Logger) *ExpirationManager {
 	if logger == nil {
-		logger = log.New(os.Stderr, "", log.LstdFlags)
+		logger = log.New("expiration_manager")
+
 	}
 	exp := &ExpirationManager{
 		router:     router,
@@ -141,7 +143,7 @@ func (m *ExpirationManager) Restore() error {
 		}
 
 		// Determine the remaining time to expiration
-		expires := le.ExpireTime.Sub(time.Now().UTC())
+		expires := le.ExpireTime.Sub(time.Now())
 		if expires <= 0 {
 			expires = minRevokeDelay
 		}
@@ -152,7 +154,9 @@ func (m *ExpirationManager) Restore() error {
 		})
 	}
 	if len(m.pending) > 0 {
-		m.logger.Printf("[INFO] expire: restored %d leases", len(m.pending))
+		if m.logger.IsInfo() {
+			m.logger.Info("expire: leases restored", "restored_lease_count", len(m.pending))
+		}
 	}
 	return nil
 }
@@ -198,7 +202,9 @@ func (m *ExpirationManager) revokeCommon(leaseID string, force, skipToken bool) 
 			if !force {
 				return err
 			} else {
-				m.logger.Printf("[WARN]: revocation from the backend failed, but in force mode so ignoring; error was: %s", err)
+				if m.logger.IsWarn() {
+					m.logger.Warn("revocation from the backend failed, but in force mode so ignoring", "error", err)
+				}
 			}
 		}
 	}
@@ -334,7 +340,7 @@ func (m *ExpirationManager) Renew(leaseID string, increment time.Duration) (*log
 	le.Data = resp.Data
 	le.Secret = resp.Secret
 	le.ExpireTime = resp.Secret.ExpirationTime()
-	le.LastRenewalTime = time.Now().UTC()
+	le.LastRenewalTime = time.Now()
 	if err := m.persistEntry(le); err != nil {
 		return nil, err
 	}
@@ -363,7 +369,7 @@ func (m *ExpirationManager) RenewToken(req *logical.Request, source string, toke
 	// Check if the lease is renewable. Note that this also checks for a nil
 	// lease and errors in that case as well.
 	if err := le.renewable(); err != nil {
-		return nil, err
+		return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
 	}
 
 	// Attempt to renew the auth entry
@@ -395,7 +401,7 @@ func (m *ExpirationManager) RenewToken(req *logical.Request, source string, toke
 	// Update the lease entry
 	le.Auth = resp.Auth
 	le.ExpireTime = resp.Auth.ExpirationTime()
-	le.LastRenewalTime = time.Now().UTC()
+	le.LastRenewalTime = time.Now()
 	if err := m.persistEntry(le); err != nil {
 		return nil, err
 	}
@@ -433,7 +439,7 @@ func (m *ExpirationManager) Register(req *logical.Request, resp *logical.Respons
 		Path:        req.Path,
 		Data:        resp.Data,
 		Secret:      resp.Secret,
-		IssueTime:   time.Now().UTC(),
+		IssueTime:   time.Now(),
 		ExpireTime:  resp.Secret.ExpirationTime(),
 	}
 
@@ -466,7 +472,7 @@ func (m *ExpirationManager) RegisterAuth(source string, auth *logical.Auth) erro
 		ClientToken: auth.ClientToken,
 		Auth:        auth,
 		Path:        source,
-		IssueTime:   time.Now().UTC(),
+		IssueTime:   time.Now(),
 		ExpireTime:  auth.ExpirationTime(),
 	}
 
@@ -509,6 +515,16 @@ func (m *ExpirationManager) FetchLeaseTimes(leaseID string) (*leaseEntry, error)
 		IssueTime:       le.IssueTime,
 		ExpireTime:      le.ExpireTime,
 		LastRenewalTime: le.LastRenewalTime,
+	}
+	if le.Secret != nil {
+		ret.Secret = &logical.Secret{}
+		ret.Secret.Renewable = le.Secret.Renewable
+		ret.Secret.TTL = le.Secret.TTL
+	}
+	if le.Auth != nil {
+		ret.Auth = &logical.Auth{}
+		ret.Auth.Renewable = le.Auth.Renewable
+		ret.Auth.TTL = le.Auth.TTL
 	}
 
 	return ret, nil
@@ -554,13 +570,15 @@ func (m *ExpirationManager) expireID(leaseID string) {
 	for attempt := uint(0); attempt < maxRevokeAttempts; attempt++ {
 		err := m.Revoke(leaseID)
 		if err == nil {
-			m.logger.Printf("[INFO] expire: revoked '%s'", leaseID)
+			if m.logger.IsInfo() {
+				m.logger.Info("expire: revoked lease", "lease_id", leaseID)
+			}
 			return
 		}
-		m.logger.Printf("[ERR] expire: failed to revoke '%s': %v", leaseID, err)
+		m.logger.Error("expire: failed to revoke lease", "lease_id", leaseID, "error", err)
 		time.Sleep((1 << attempt) * revokeRetryBase)
 	}
-	m.logger.Printf("[ERR] expire: maximum revoke attempts for '%s' reached", leaseID)
+	m.logger.Error("expire: maximum revoke attempts reached", "lease_id", leaseID)
 }
 
 // revokeEntry is used to attempt revocation of an internal entry
@@ -576,10 +594,10 @@ func (m *ExpirationManager) revokeEntry(le *leaseEntry) error {
 	}
 
 	// Handle standard revocation via backends
-	_, err := m.router.Route(logical.RevokeRequest(
+	resp, err := m.router.Route(logical.RevokeRequest(
 		le.Path, le.Secret, le.Data))
-	if err != nil {
-		return fmt.Errorf("failed to revoke entry: %v", err)
+	if err != nil || (resp != nil && resp.IsError()) {
+		return fmt.Errorf("failed to revoke entry: resp:%#v err:%s", resp, err)
 	}
 	return nil
 }
@@ -593,8 +611,8 @@ func (m *ExpirationManager) renewEntry(le *leaseEntry, increment time.Duration) 
 
 	req := logical.RenewRequest(le.Path, &secret, le.Data)
 	resp, err := m.router.Route(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to renew entry: %v", err)
+	if err != nil || (resp != nil && resp.IsError()) {
+		return nil, fmt.Errorf("failed to renew entry: resp:%#v err:%s", resp, err)
 	}
 	return resp, nil
 }
@@ -752,7 +770,7 @@ func (le *leaseEntry) renewable() error {
 	}
 
 	// Determine if the lease is expired
-	if le.ExpireTime.Before(time.Now().UTC()) {
+	if le.ExpireTime.Before(time.Now()) {
 		return fmt.Errorf("lease expired")
 	}
 
@@ -769,5 +787,5 @@ func (le *leaseEntry) renewable() error {
 // decodeLeaseEntry is used to reverse encode and return a new entry
 func decodeLeaseEntry(buf []byte) (*leaseEntry, error) {
 	out := new(leaseEntry)
-	return out, json.Unmarshal(buf, out)
+	return out, jsonutil.DecodeJSON(buf, out)
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/hashicorp/vault/helper/certutil"
@@ -71,8 +72,8 @@ func (b *backend) pathLogin(
 			Metadata: map[string]string{
 				"cert_name":        matched.Entry.Name,
 				"common_name":      clientCerts[0].Subject.CommonName,
-				"subject_key_id":   certutil.GetOctalFormatted(clientCerts[0].SubjectKeyId, ":"),
-				"authority_key_id": certutil.GetOctalFormatted(clientCerts[0].AuthorityKeyId, ":"),
+				"subject_key_id":   certutil.GetHexFormatted(clientCerts[0].SubjectKeyId, ":"),
+				"authority_key_id": certutil.GetHexFormatted(clientCerts[0].AuthorityKeyId, ":"),
 			},
 			LeaseOptions: logical.LeaseOptions{
 				Renewable: true,
@@ -106,7 +107,7 @@ func (b *backend) pathLoginRenew(
 
 		clientCerts := req.Connection.ConnState.PeerCertificates
 		if len(clientCerts) == 0 {
-			return logical.ErrorResponse("no client certificate found"), nil
+			return nil, fmt.Errorf("no client certificate found")
 		}
 		skid := base64.StdEncoding.EncodeToString(clientCerts[0].SubjectKeyId)
 		akid := base64.StdEncoding.EncodeToString(clientCerts[0].AuthorityKeyId)
@@ -114,7 +115,7 @@ func (b *backend) pathLoginRenew(
 		// Certificate should not only match a registered certificate policy.
 		// Also, the identity of the certificate presented should match the identity of the certificate used during login
 		if req.Auth.InternalData["subject_key_id"] != skid && req.Auth.InternalData["authority_key_id"] != akid {
-			return logical.ErrorResponse("client identity during renewal not matching client identity used during login"), nil
+			return nil, fmt.Errorf("client identity during renewal not matching client identity used during login")
 		}
 
 	}
@@ -129,7 +130,7 @@ func (b *backend) pathLoginRenew(
 	}
 
 	if !policyutil.EquivalentPolicies(cert.Policies, req.Auth.Policies) {
-		return logical.ErrorResponse("policies have changed, not renewing"), nil
+		return nil, fmt.Errorf("policies have changed, not renewing")
 	}
 
 	return framework.LeaseExtend(cert.TTL, 0, b.System())(req, d)
@@ -142,6 +143,10 @@ func (b *backend) verifyCredentials(req *logical.Request) (*ParsedCert, *logical
 	}
 	connState := req.Connection.ConnState
 
+	if connState.PeerCertificates == nil || len(connState.PeerCertificates) == 0 {
+		return nil, logical.ErrorResponse("client certificate must be supplied"), nil
+	}
+
 	// Load the trusted certificates
 	roots, trusted, trustedNonCAs := b.loadTrustedCerts(req.Storage)
 
@@ -149,7 +154,7 @@ func (b *backend) verifyCredentials(req *logical.Request) (*ParsedCert, *logical
 	// with the backend.
 	if len(trustedNonCAs) != 0 {
 		policy := b.matchNonCAPolicy(connState.PeerCertificates[0], trustedNonCAs)
-		if policy != nil {
+		if policy != nil && !b.checkForChainInCRLs(policy.Certificates) {
 			return policy, nil, nil
 		}
 	}
@@ -165,7 +170,7 @@ func (b *backend) verifyCredentials(req *logical.Request) (*ParsedCert, *logical
 		return nil, logical.ErrorResponse("invalid certificate or no client certificate supplied"), nil
 	}
 
-	validChain := b.checkForValidChain(req.Storage, trustedChains)
+	validChain := b.checkForValidChain(trustedChains)
 	if !validChain {
 		return nil, logical.ErrorResponse(
 			"no chain containing non-revoked certificates could be found for this login certificate",
@@ -209,20 +214,22 @@ func (b *backend) matchPolicy(chains [][]*x509.Certificate, trusted []*ParsedCer
 // loadTrustedCerts is used to load all the trusted certificates from the backend
 func (b *backend) loadTrustedCerts(store logical.Storage) (pool *x509.CertPool, trusted []*ParsedCert, trustedNonCAs []*ParsedCert) {
 	pool = x509.NewCertPool()
+	trusted = make([]*ParsedCert, 0)
+	trustedNonCAs = make([]*ParsedCert, 0)
 	names, err := store.List("cert/")
 	if err != nil {
-		b.Logger().Printf("[ERR] cert: failed to list trusted certs: %v", err)
+		b.Logger().Error("cert: failed to list trusted certs", "error", err)
 		return
 	}
 	for _, name := range names {
 		entry, err := b.Cert(store, strings.TrimPrefix(name, "cert/"))
 		if err != nil {
-			b.Logger().Printf("[ERR] cert: failed to load trusted certs '%s': %v", name, err)
+			b.Logger().Error("cert: failed to load trusted cert", "name", name, "error", err)
 			continue
 		}
 		parsed := parsePEM([]byte(entry.Certificate))
 		if len(parsed) == 0 {
-			b.Logger().Printf("[ERR] cert: failed to parse certificate for '%s'", name)
+			b.Logger().Error("cert: failed to parse certificate", "name", name)
 			continue
 		}
 		if !parsed[0].IsCA {
@@ -245,18 +252,21 @@ func (b *backend) loadTrustedCerts(store logical.Storage) (pool *x509.CertPool, 
 	return
 }
 
-func (b *backend) checkForValidChain(store logical.Storage, chains [][]*x509.Certificate) bool {
-	var badChain bool
-	for _, chain := range chains {
-		badChain = false
-		for _, cert := range chain {
-			badCRLs := b.findSerialInCRLs(cert.SerialNumber)
-			if len(badCRLs) != 0 {
-				badChain = true
-				break
-			}
+func (b *backend) checkForChainInCRLs(chain []*x509.Certificate) bool {
+	badChain := false
+	for _, cert := range chain {
+		badCRLs := b.findSerialInCRLs(cert.SerialNumber)
+		if len(badCRLs) != 0 {
+			badChain = true
+			break
 		}
-		if !badChain {
+	}
+	return badChain
+}
+
+func (b *backend) checkForValidChain(chains [][]*x509.Certificate) bool {
+	for _, chain := range chains {
+		if !b.checkForChainInCRLs(chain) {
 			return true
 		}
 	}

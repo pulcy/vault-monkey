@@ -20,7 +20,7 @@ func TestCore_DefaultAuthTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	unseal, err := c2.Unseal(key)
+	unseal, err := TestCoreUnseal(c2, key)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -41,8 +41,9 @@ func TestCore_EnableCredential(t *testing.T) {
 	}
 
 	me := &MountEntry{
-		Path: "foo",
-		Type: "noop",
+		Table: credentialTableType,
+		Path:  "foo",
+		Type:  "noop",
 	}
 	err := c.enableCredential(me)
 	if err != nil {
@@ -65,7 +66,7 @@ func TestCore_EnableCredential(t *testing.T) {
 	c2.credentialBackends["noop"] = func(*logical.BackendConfig) (logical.Backend, error) {
 		return &NoopBackend{}, nil
 	}
-	unseal, err := c2.Unseal(key)
+	unseal, err := TestCoreUnseal(c2, key)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -86,8 +87,9 @@ func TestCore_EnableCredential_twice_409(t *testing.T) {
 	}
 
 	me := &MountEntry{
-		Path: "foo",
-		Type: "noop",
+		Table: credentialTableType,
+		Path:  "foo",
+		Type:  "noop",
 	}
 	err := c.enableCredential(me)
 	if err != nil {
@@ -109,8 +111,9 @@ func TestCore_EnableCredential_twice_409(t *testing.T) {
 func TestCore_EnableCredential_Token(t *testing.T) {
 	c, _, _ := TestCoreUnsealed(t)
 	me := &MountEntry{
-		Path: "foo",
-		Type: "token",
+		Table: credentialTableType,
+		Path:  "foo",
+		Type:  "token",
 	}
 	err := c.enableCredential(me)
 	if err.Error() != "token credential backend cannot be instantiated" {
@@ -124,23 +127,24 @@ func TestCore_DisableCredential(t *testing.T) {
 		return &NoopBackend{}, nil
 	}
 
-	err := c.disableCredential("foo")
-	if err.Error() != "no matching backend" {
-		t.Fatalf("err: %v", err)
+	existed, err := c.disableCredential("foo")
+	if existed || err.Error() != "no matching backend" {
+		t.Fatalf("existed: %v; err: %v", existed, err)
 	}
 
 	me := &MountEntry{
-		Path: "foo",
-		Type: "noop",
+		Table: credentialTableType,
+		Path:  "foo",
+		Type:  "noop",
 	}
 	err = c.enableCredential(me)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	err = c.disableCredential("foo")
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	existed, err = c.disableCredential("foo")
+	if !existed || err != nil {
+		t.Fatalf("existed: %v; err: %v", existed, err)
 	}
 
 	match := c.router.MatchingMount("auth/foo/bar")
@@ -156,7 +160,7 @@ func TestCore_DisableCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	unseal, err := c2.Unseal(key)
+	unseal, err := TestCoreUnseal(c2, key)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -172,9 +176,9 @@ func TestCore_DisableCredential(t *testing.T) {
 
 func TestCore_DisableCredential_Protected(t *testing.T) {
 	c, _, _ := TestCoreUnsealed(t)
-	err := c.disableCredential("token")
-	if err.Error() != "token credential backend cannot be disabled" {
-		t.Fatalf("err: %v", err)
+	existed, err := c.disableCredential("token")
+	if !existed || err.Error() != "token credential backend cannot be disabled" {
+		t.Fatalf("existed: %v; err: %v", existed, err)
 	}
 }
 
@@ -188,8 +192,9 @@ func TestCore_DisableCredential_Cleanup(t *testing.T) {
 	}
 
 	me := &MountEntry{
-		Path: "foo",
-		Type: "noop",
+		Table: credentialTableType,
+		Path:  "foo",
+		Type:  "noop",
 	}
 	err := c.enableCredential(me)
 	if err != nil {
@@ -227,9 +232,9 @@ func TestCore_DisableCredential_Cleanup(t *testing.T) {
 	}
 
 	// Disable should cleanup
-	err = c.disableCredential("foo")
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	existed, err := c.disableCredential("foo")
+	if !existed || err != nil {
+		t.Fatalf("existed: %v; err: %v", existed, err)
 	}
 
 	// Token should be revoked
@@ -259,6 +264,9 @@ func TestDefaultAuthTable(t *testing.T) {
 func verifyDefaultAuthTable(t *testing.T, table *MountTable) {
 	if len(table.Entries) != 1 {
 		t.Fatalf("bad: %v", table.Entries)
+	}
+	if table.Type != credentialTableType {
+		t.Fatalf("bad: %v", *table)
 	}
 	for idx, entry := range table.Entries {
 		switch idx {

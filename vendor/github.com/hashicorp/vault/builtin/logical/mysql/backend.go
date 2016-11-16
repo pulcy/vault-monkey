@@ -15,16 +15,10 @@ func Factory(conf *logical.BackendConfig) (logical.Backend, error) {
 	return Backend().Setup(conf)
 }
 
-func Backend() *framework.Backend {
+func Backend() *backend {
 	var b backend
 	b.Backend = &framework.Backend{
 		Help: strings.TrimSpace(backendHelp),
-
-		PathsSpecial: &logical.Paths{
-			Root: []string{
-				"config/*",
-			},
-		},
 
 		Paths: []*framework.Path{
 			pathConfigConnection(&b),
@@ -39,7 +33,7 @@ func Backend() *framework.Backend {
 		},
 	}
 
-	return b.Backend
+	return &b
 }
 
 type backend struct {
@@ -56,7 +50,12 @@ func (b *backend) DB(s logical.Storage) (*sql.DB, error) {
 
 	// If we already have a DB, we got it!
 	if b.db != nil {
-		return b.db, nil
+		if err := b.db.Ping(); err == nil {
+			return b.db, nil
+		}
+		// If the ping was unsuccessful, close it and ignore errors as we'll be
+		// reestablishing anyways
+		b.db.Close()
 	}
 
 	// Otherwise, attempt to make connection
@@ -87,6 +86,7 @@ func (b *backend) DB(s logical.Storage) (*sql.DB, error) {
 	// Set some connection pool settings. We don't need much of this,
 	// since the request rate shouldn't be high.
 	b.db.SetMaxOpenConns(connConfig.MaxOpenConnections)
+	b.db.SetMaxIdleConns(connConfig.MaxIdleConnections)
 
 	return b.db, nil
 }

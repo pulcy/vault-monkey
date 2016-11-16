@@ -22,13 +22,13 @@ data written to the storage backend.
 ![Keys](/assets/images/keys.png)
 
 To support key rotation, we need to support changing the unseal keys, master key, and the
-backend encryption key. We split this into two seperate operations, `rekey` and `rotate`.
+backend encryption key. We split this into two separate operations, `rekey` and `rotate`.
 
 The `rekey` operation is used to generate a new master key. When this is being done,
 it is possible to change the parameters of the key splitting, so that the number of shares
 and the threshold required to unseal can be changed. To perform a rekey a threshold of the
 current unseal keys must be provided. This is to prevent a single malicious operator from
-performing a rekey and invaliding the existing master key.
+performing a rekey and invalidating the existing master key.
 
 Performing a rekey is fairly straightforward. The rekey operation must be initialized with
 the new parameters for the split and threshold. Once initialized, the current unseal keys

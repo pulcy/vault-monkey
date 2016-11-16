@@ -205,6 +205,22 @@ func ParseConsistency(s string) Consistency {
 	}
 }
 
+// ParseConsistencyWrapper wraps gocql.ParseConsistency to provide an err
+// return instead of a panic
+func ParseConsistencyWrapper(s string) (consistency Consistency, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var ok bool
+			err, ok = r.(error)
+			if !ok {
+				err = fmt.Errorf("ParseConsistencyWrapper: %v", r)
+			}
+		}
+	}()
+	consistency = ParseConsistency(s)
+	return consistency, nil
+}
+
 type SerialConsistency uint16
 
 const (
@@ -349,7 +365,7 @@ func readHeader(r io.Reader, p []byte) (head frameHeader, err error) {
 	version := p[0] & protoVersionMask
 
 	if version < protoVersion1 || version > protoVersion4 {
-		return frameHeader{}, fmt.Errorf("gocql: unsupported response version: %d", version)
+		return frameHeader{}, fmt.Errorf("gocql: unsupported protocol response version: %d", version)
 	}
 
 	headSize := 9
@@ -1414,8 +1430,9 @@ type writeBatchFrame struct {
 	consistency Consistency
 
 	// v3+
-	serialConsistency SerialConsistency
-	defaultTimestamp  bool
+	serialConsistency     SerialConsistency
+	defaultTimestamp      bool
+	defaultTimestampValue int64
 }
 
 func (w *writeBatchFrame) writeFrame(framer *framer, streamID int) error {
@@ -1469,9 +1486,15 @@ func (f *framer) writeBatchFrame(streamID int, w *writeBatchFrame) error {
 		if w.serialConsistency > 0 {
 			f.writeConsistency(Consistency(w.serialConsistency))
 		}
+
 		if w.defaultTimestamp {
-			now := time.Now().UnixNano() / 1000
-			f.writeLong(now)
+			var ts int64
+			if w.defaultTimestampValue != 0 {
+				ts = w.defaultTimestampValue
+			} else {
+				ts = time.Now().UnixNano() / 1000
+			}
+			f.writeLong(ts)
 		}
 	}
 

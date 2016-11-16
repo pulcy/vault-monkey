@@ -17,7 +17,7 @@ REPOPATH := $(ORGPATH)/$(REPONAME)
 BIN := $(BINDIR)/$(PROJECT)
 
 GOPATH := $(GOBUILDDIR)
-GOVERSION := 1.7.0-alpine
+GOVERSION := 1.7.3-alpine
 
 ifndef GOOS
 	GOOS := linux
@@ -48,8 +48,11 @@ $(GOBUILDDIR):
 update-vendor:
 	@rm -Rf $(VENDORDIR)
 	@pulsar go vendor -V $(VENDORDIR) \
+		github.com/coreos/etcd/client \
 		github.com/dchest/uniuri \
 		github.com/giantswarm/retry-go \
+		github.com/hashicorp/consul/api \
+		github.com/hashicorp/go-rootcerts \
 		github.com/hashicorp/hcl \
 		github.com/hashicorp/vault/api \
 		github.com/juju/errgo \

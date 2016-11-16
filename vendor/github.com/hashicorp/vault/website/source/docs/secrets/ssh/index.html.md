@@ -79,7 +79,7 @@ Success! Data written to: ssh/roles/otp_key_role
 
 ### Create a Credential
 
-Create an OTP credential for an IP that belongs to `otp_key_role`.
+Create an OTP credential for an IP of the remote host that belongs to `otp_key_role`.
 
 ```text
 $ vault write ssh/creds/otp_key_role ip=x.x.x.x
@@ -105,7 +105,7 @@ username@ip:~$
 ### Automate it!
 
 A single CLI command can be used to create a new OTP and invoke SSH with the
-correct paramters to connect to the host.
+correct parameters to connect to the host.
 
 ```text
 $ vault ssh -role otp_key_role username@x.x.x.x
@@ -117,9 +117,12 @@ Password: <Enter OTP>
 The OTP will be entered automatically using `sshpass` if it is installed.
 
 ```text
-$ vault ssh -role otp_key_role username@x.x.x.x
-username@ip:~$
+$ vault ssh -role otp_key_role -strict-host-key-checking=no username@x.x.x.x
+username@<IP of remote host>:~$
 ```
+
+Note: `sshpass` cannot handle host key checking. Host key checking can be
+disabled by setting `-strict-host-key-checking=no`.
 
 ----------------------------------------------------
 ## II. Dynamic Key Type
@@ -222,7 +225,7 @@ To see the default, see [linux_install_script.go](https://github.com/hashicorp/v
 
 ### Create a credential
 
-Create a dynamic key for an IP that is covered by `dynamic_key_role`'s CIDR
+Create a dynamic key for an IP of the remote host that is covered by `dynamic_key_role`'s CIDR
 list.
 
 ```text
@@ -270,8 +273,8 @@ Save the key to a file (e.g. `dyn_key.pem`) and then use it to establish an
 SSH session.
 
 ```text
-$ ssh -i dyn_key.pem username@ip
-username@ip:~$
+$ ssh -i dyn_key.pem username@<IP of remote host>
+username@<IP of remote host>:~$
 ```
 
 ### Automate it!
@@ -280,8 +283,8 @@ Creation of new key, saving to a file, and using it to establish an SSH session
 can all be done with a single Vault CLI command.
 
 ```text
-$ vault ssh -role dynamic_key_role username@ip
-username@ip:~$
+$ vault ssh -role dynamic_key_role username@<IP of remote host>
+username@<IP of remote host>:~$
 ```
 
 ----------------------------------------------------
@@ -293,7 +296,7 @@ username@ip:~$
 <dl class="api">
   <dt>Description</dt>
   <dd>
-    Creates or updates a named key. This is a root protected endpoint.
+    Creates or updates a named key.
   </dd>
 
   <dt>Method</dt>
@@ -324,7 +327,7 @@ username@ip:~$
 <dl class="api">
   <dt>Description</dt>
   <dd>
-    Deletes a named key. This is a root protected endpoint.
+    Deletes a named key.
   </dd>
 
   <dt>Method</dt>
@@ -437,10 +440,11 @@ username@ip:~$
         <span class="param">allowed_users</span>
         <span class="param-flags">optional for both types</span>
 	      (String)
-	      If this option is not specified, a client can request credentials
-        to log into any valid user at the remote host, including the admin
-        user. If this field is set, credentials can only be created for
-        the values in this list and the value of the `default_user` field.
+	      If this option is not specified, credentials can be created only for
+              `default_user` at the remote host. If this field is set, credentials
+              can be created only for the users in this list and for the `default_user`.
+              If this option is explicitly set to `*`, then credentials can be created
+              for any username.
       </li>
       <li>
         <span class="param">key_option_specs</span>
@@ -513,10 +517,10 @@ username@ip:~$
   </dd>
 
   <dt>Method</dt>
-  <dd>GET</dd>
+  <dd>LIST/GET</dd>
 
   <dt>URL</dt>
-  <dd>`/roles/?list=true`</dd>
+  <dd>`/ssh/roles` (LIST) or `/ssh/roles?list=true` (GET)</dd>
 
   <dt>Parameters</dt>
   <dd>
@@ -532,7 +536,7 @@ username@ip:~$
     "data": {
       "keys": ["dev", "prod"]
     },
-    "lease_duration": 2592000,
+    "lease_duration": 2764800,
     "lease_id": "",
     "renewable": false
   }
@@ -724,7 +728,7 @@ username@ip:~$
 {
   "lease_id": "sshs/creds/c3c2e60c-5a48-415a-9d5a-a41e0e6cdec5/3ee6ad28-383f-d482-2427-70498eba4d96",
   "renewable": false,
-  "lease_duration": 2592000,
+  "lease_duration": 2764800,
   "data": {
             "ip": "127.0.0.1",
             "key": "6d6411fd-f622-ea0a-7e2c-989a745cbbb2",
@@ -830,4 +834,4 @@ username@ip:~$
 
   </dd>
 
-  <dd>A `204` response code with an empty response body, for an invalid OTP.</dd>
+  <dd>A `400` BadRequest response code with 'OTP not found' message, for an invalid OTP.</dd>

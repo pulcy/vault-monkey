@@ -39,6 +39,19 @@ certificate storage, or both. In addition, you can specify a safety buffer
 (defaulting to 72 hours) to ensure that any time discrepancies between your
 hosts is accounted for.
 
+## PKI Backend Does Not Issue Leases for CA Certificates
+
+When a token expires, it revokes all leases associated with it. This means that
+long-lived CA certs need correspondingly long-lived tokens, something that is
+easy to forget, resulting in an unintended revocation of the CA certificate
+when the token expires. To prevent this, root and intermediate CA certs no
+longer have associated leases. To revoke these certificates, use the
+`pki/revoke` endpoint.
+
+CA certificates that have already been issued and acquired leases will report
+to the lease manager that revocation was successful, but will not actually be
+revoked and placed onto the CRL.
+
 ## Cert Authentication Backend Performs Client Checking During Renewals
 
 The `cert` backend now performs a variant of channel binding at renewal time
@@ -76,3 +89,17 @@ result, rather than always decode as a `float64`, numbers are returned as a
 `int64`, `float64`, or simply used as a `string` value. This fixes some display
 errors where numbers were being decoded as `float64` and printed in scientific
 notation.
+
+## List Operations Return `404` On No Keys Found
+
+Previously, list operations on an endpoint with no keys found would return an
+empty response object. Now, a `404` will be returned instead.
+
+## Consul TTL Checks Automatically Registered
+
+If using the Consul HA storage backend, Vault will now automatically register
+itself as the `vault` service and perform its own health checks/lifecycle
+status management. This behavior can be adjusted or turned off in Vault's
+configuration; see the
+[documentation](https://www.vaultproject.io/docs/config/index.html#check_timeout)
+for details.

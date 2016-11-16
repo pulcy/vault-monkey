@@ -4,14 +4,17 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	log "github.com/mgutz/logxi/v1"
+
 	"github.com/Azure/azure-sdk-for-go/storage"
 	"github.com/armon/go-metrics"
+	"github.com/hashicorp/errwrap"
 )
 
 // MaxBlobSize at this time
@@ -20,15 +23,16 @@ var MaxBlobSize = 1024 * 1024 * 4
 // AzureBackend is a physical backend that stores data
 // within an Azure blob container.
 type AzureBackend struct {
-	container string
-	client    storage.BlobStorageClient
-	logger    *log.Logger
+	container  string
+	client     storage.BlobStorageClient
+	logger     log.Logger
+	permitPool *PermitPool
 }
 
 // newAzureBackend constructs an Azure backend using a pre-existing
 // bucket. Credentials can be provided to the backend, sourced
 // from the environment, AWS credential files or by IAM role.
-func newAzureBackend(conf map[string]string, logger *log.Logger) (Backend, error) {
+func newAzureBackend(conf map[string]string, logger log.Logger) (Backend, error) {
 
 	container := os.Getenv("AZURE_BLOB_CONTAINER")
 	if container == "" {
@@ -62,10 +66,23 @@ func newAzureBackend(conf map[string]string, logger *log.Logger) (Backend, error
 
 	client.GetBlobService().CreateContainerIfNotExists(container, storage.ContainerAccessTypePrivate)
 
+	maxParStr, ok := conf["max_parallel"]
+	var maxParInt int
+	if ok {
+		maxParInt, err = strconv.Atoi(maxParStr)
+		if err != nil {
+			return nil, errwrap.Wrapf("failed parsing max_parallel parameter: {{err}}", err)
+		}
+		if logger.IsDebug() {
+			logger.Debug("azure: max_parallel set", "max_parallel", maxParInt)
+		}
+	}
+
 	a := &AzureBackend{
-		container: container,
-		client:    client.GetBlobService(),
-		logger:    logger,
+		container:  container,
+		client:     client.GetBlobService(),
+		logger:     logger,
+		permitPool: NewPermitPool(maxParInt),
 	}
 	return a, nil
 }
@@ -82,6 +99,9 @@ func (a *AzureBackend) Put(entry *Entry) error {
 	blocks := make([]storage.Block, 1)
 	blocks[0] = storage.Block{ID: blockID, Status: storage.BlockStatusLatest}
 
+	a.permitPool.Acquire()
+	defer a.permitPool.Release()
+
 	err := a.client.PutBlock(a.container, entry.Key, blockID, entry.Value)
 
 	err = a.client.PutBlockList(a.container, entry.Key, blocks)
@@ -91,6 +111,9 @@ func (a *AzureBackend) Put(entry *Entry) error {
 // Get is used to fetch an entry
 func (a *AzureBackend) Get(key string) (*Entry, error) {
 	defer metrics.MeasureSince([]string{"azure", "get"}, time.Now())
+
+	a.permitPool.Acquire()
+	defer a.permitPool.Release()
 
 	exists, _ := a.client.BlobExists(a.container, key)
 
@@ -117,6 +140,10 @@ func (a *AzureBackend) Get(key string) (*Entry, error) {
 // Delete is used to permanently delete an entry
 func (a *AzureBackend) Delete(key string) error {
 	defer metrics.MeasureSince([]string{"azure", "delete"}, time.Now())
+
+	a.permitPool.Acquire()
+	defer a.permitPool.Release()
+
 	_, err := a.client.DeleteBlobIfExists(a.container, key, nil)
 	return err
 }
@@ -125,6 +152,9 @@ func (a *AzureBackend) Delete(key string) error {
 // prefix, up to the next prefix.
 func (a *AzureBackend) List(prefix string) ([]string, error) {
 	defer metrics.MeasureSince([]string{"azure", "list"}, time.Now())
+
+	a.permitPool.Acquire()
+	defer a.permitPool.Release()
 
 	list, err := a.client.ListBlobs(a.container, storage.ListBlobsParameters{Prefix: prefix})
 

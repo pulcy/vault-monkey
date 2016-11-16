@@ -1,12 +1,13 @@
 package transit
 
 import (
+	"github.com/hashicorp/vault/helper/keysutil"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 )
 
 func Factory(conf *logical.BackendConfig) (logical.Backend, error) {
-	b := Backend()
+	b := Backend(conf)
 	be, err := b.Backend.Setup(conf)
 	if err != nil {
 		return nil, err
@@ -15,7 +16,7 @@ func Factory(conf *logical.BackendConfig) (logical.Backend, error) {
 	return be, nil
 }
 
-func Backend() *backend {
+func Backend(conf *logical.BackendConfig) *backend {
 	var b backend
 	b.Backend = &framework.Backend{
 		Paths: []*framework.Path{
@@ -25,22 +26,26 @@ func Backend() *backend {
 			b.pathRotate(),
 			b.pathRewrap(),
 			b.pathKeys(),
+			b.pathListKeys(),
 			b.pathEncrypt(),
 			b.pathDecrypt(),
 			b.pathDatakey(),
+			b.pathRandom(),
+			b.pathHash(),
+			b.pathHMAC(),
+			b.pathSign(),
+			b.pathVerify(),
 		},
 
 		Secrets: []*framework.Secret{},
 	}
 
-	b.policies = policyCache{
-		cache: map[string]*lockingPolicy{},
-	}
+	b.lm = keysutil.NewLockManager(conf.System.CachingDisabled())
 
 	return &b
 }
 
 type backend struct {
 	*framework.Backend
-	policies policyCache
+	lm *keysutil.LockManager
 }
