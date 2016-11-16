@@ -55,6 +55,8 @@ func mustCreateBackend(bType, bAddress string) migration.Backend {
 	switch bType {
 	case "etcd":
 		b, err = migration.NewEtcdBackend(bAddress)
+	case "consul":
+		b, err = migration.NewConsulBackend(bAddress)
 	default:
 		Exitf("Unknown backend type '%s'", bType)
 	}

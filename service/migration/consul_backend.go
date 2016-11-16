@@ -14,6 +14,9 @@ type consulBackend struct {
 }
 
 func NewConsulBackend(address string) (Backend, error) {
+	if address == "" {
+		address = "http://127.0.0.1:8500/vault"
+	}
 	url, err := url.Parse(address)
 	if err != nil {
 		return nil, maskAny(err)

@@ -20,6 +20,9 @@ type etcdBackend struct {
 }
 
 func NewEtcdBackend(address string) (Backend, error) {
+	if address == "" {
+		address = "http://127.0.0.1:2379/vault"
+	}
 	url, err := url.Parse(address)
 	if err != nil {
 		return nil, maskAny(err)
