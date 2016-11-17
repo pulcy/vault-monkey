@@ -40,6 +40,42 @@ of the header should be "X-Vault-Token" and the value should be the token.
 
 ## API
 
+### /auth/token/accessors
+#### LIST
+
+<dl class="api">
+  <dt>Description</dt>
+  <dd>
+    Lists token accessors. This requires `sudo` capability, and access to it
+    should be tightly controlled as the accessors can be used to revoke very
+    large numbers of tokens and their associated leases at once.
+  </dd>
+
+  <dt>Method</dt>
+  <dd>LIST/GET</dd>
+
+  <dt>URL</dt>
+  <dd>`/auth/token/accessors` (LIST) or `/auth/token/accessors?list=true` (GET)<dd>
+
+  <dt>Parameters</dt>
+  <dd>
+    None
+  </dd>
+
+  <dt>Returns</dt>
+  <dd>
+
+    ```javascript
+    {
+      "data": {
+        "keys": ["476ea048-ded5-4d07-eeea-938c6b4e43ec", "bb00c093-b7d3-b0e9-69cc-c4d85081165b"]
+      }
+    }
+    ```
+
+  </dd>
+</dl>
+
 ### /auth/token/create
 ### /auth/token/create-orphan
 ### /auth/token/create/[role_name]
@@ -99,6 +135,13 @@ of the header should be "X-Vault-Token" and the value should be the token.
         policy set.
       </li>
       <li>
+        <span class="param">renewable</span>
+        <span class="param-flags">optional</span>
+        Set to `false` to disable the ability of the token to be renewed past
+        its initial TTL. Specifying `true`, or omitting this option, will allow
+        the token to be renewable up to the system/mount maximum TTL.
+      </li>
+      <li>
         <span class="param">lease</span>
         <span class="param-flags">optional</span>
         DEPRECATED; use "ttl" instead.
@@ -110,6 +153,15 @@ of the header should be "X-Vault-Token" and the value should be the token.
         the largest suffix. If not provided, the token is valid for the
         [default lease TTL](/docs/config/index.html), or
         indefinitely if the root policy is used.
+      </li>
+      <li>
+        <span class="param">explicit_max_ttl</span>
+        <span class="param-flags">optional</span>
+        If set, the token will have an explicit max TTL set upon it. This
+        maximum token TTL *cannot* be changed later, and unlike with normal
+        tokens, updates to the system/mount max TTL value will have no effect
+        at renewal time -- the token will never be able to be renewed or used
+        past the value set at issue time. 
       </li>
       <li>
         <span class="param">display_name</span>
@@ -141,41 +193,6 @@ of the header should be "X-Vault-Token" and the value should be the token.
     }
     ```
 
-  </dd>
-</dl>
-
-### /auth/token/lookup-self
-#### GET
-
-<dl class="api">
-  <dt>Description</dt>
-  <dd>
-    Returns information about the current client token.
-  </dd>
-
-  <dt>Method</dt>
-  <dd>GET</dd>
-
-  <dt>Parameters</dt>
-  <dd>
-    None
-  </dd>
-
-  <dt>Returns</dt>
-  <dd>
-
-    ```javascript
-    {
-      "data": {
-        "id": "ClientToken",
-        "policies": ["web", "stage"],
-        "path": "auth/github/login",
-        "meta": {"user": "armon", "organization": "hashicorp"},
-        "display_name": "github-armon",
-        "num_uses": 0,
-      }
-    }
-    ```
   </dd>
 </dl>
 
@@ -217,7 +234,6 @@ of the header should be "X-Vault-Token" and the value should be the token.
 
   </dd>
 </dl>
-
 
 #### POST
 
@@ -263,31 +279,30 @@ of the header should be "X-Vault-Token" and the value should be the token.
   </dd>
 </dl>
 
-### /auth/token/renew-self
+### /auth/token/lookup-accessor[/accessor]
 #### POST
 
 <dl class="api">
   <dt>Description</dt>
   <dd>
-	Renews a lease associated with the calling token. This is used to prevent
-	the expiration of a token, and the automatic revocation of it. Token
-	renewal is possible only if there is a lease associated with it.
+      Fetch the properties of the token associated with the accessor, except the token ID.
+      This is meant for purposes where there is no access to token ID but there is need
+      to fetch the properties of a token.
   </dd>
 
   <dt>Method</dt>
   <dd>POST</dd>
 
   <dt>URL</dt>
-  <dd>`/auth/token/renew-self`</dd>
+  <dd>`/auth/token/lookup-accessor</accessor>`</dd>
 
   <dt>Parameters</dt>
   <dd>
     <ul>
       <li>
-        <span class="param">increment</span>
-        <span class="param-flags">optional</span>
-            An optional requested lease increment can be provided. This
-            increment may be ignored.
+        <span class="param">accessor</span>
+        <span class="param-flags">required</span>
+            Accessor of the token to lookup. This can be part of the URL or the body.
       </li>
     </ul>
   </dd>
@@ -297,16 +312,61 @@ of the header should be "X-Vault-Token" and the value should be the token.
 
     ```javascript
     {
-      "auth": {
-        "client_token": "ABCD",
-        "policies": ["web", "stage"],
-        "metadata": {"user": "armon"},
-        "lease_duration": 3600,
-        "renewable": true,
-      }
+      "lease_id": "",
+      "renewable": false,
+      "lease_duration": 0,
+      "data": {
+        "creation_time": 1457533232,
+        "creation_ttl": 2764800,
+        "display_name": "token",
+        "id": "",
+        "meta": null,
+        "num_uses": 0,
+        "orphan": false,
+        "path": "auth/token/create",
+        "policies": ["default", "web"],
+        "ttl": 2591976
+      },
+      "warnings": null,
+      "auth": null
     }
     ```
 
+  </dd>
+</dl>
+
+### /auth/token/lookup-self
+#### GET
+
+<dl class="api">
+  <dt>Description</dt>
+  <dd>
+    Returns information about the current client token.
+  </dd>
+
+  <dt>Method</dt>
+  <dd>GET</dd>
+
+  <dt>Parameters</dt>
+  <dd>
+    None
+  </dd>
+
+  <dt>Returns</dt>
+  <dd>
+
+    ```javascript
+    {
+      "data": {
+        "id": "ClientToken",
+        "policies": ["web", "stage"],
+        "path": "auth/github/login",
+        "meta": {"user": "armon", "organization": "hashicorp"},
+        "display_name": "github-armon",
+        "num_uses": 0,
+      }
+    }
+    ```
   </dd>
 </dl>
 
@@ -337,6 +397,53 @@ of the header should be "X-Vault-Token" and the value should be the token.
       </li>
     </ul>
   </dd>
+  <dd>
+    <ul>
+      <li>
+        <span class="param">increment</span>
+        <span class="param-flags">optional</span>
+            An optional requested lease increment can be provided. This
+            increment may be ignored.
+      </li>
+    </ul>
+  </dd>
+
+  <dt>Returns</dt>
+  <dd>
+
+    ```javascript
+    {
+      "auth": {
+        "client_token": "ABCD",
+        "policies": ["web", "stage"],
+        "metadata": {"user": "armon"},
+        "lease_duration": 3600,
+        "renewable": true,
+      }
+    }
+    ```
+
+  </dd>
+</dl>
+
+### /auth/token/renew-self
+#### POST
+
+<dl class="api">
+  <dt>Description</dt>
+  <dd>
+	Renews a lease associated with the calling token. This is used to prevent
+	the expiration of a token, and the automatic revocation of it. Token
+	renewal is possible only if there is a lease associated with it.
+  </dd>
+
+  <dt>Method</dt>
+  <dd>POST</dd>
+
+  <dt>URL</dt>
+  <dd>`/auth/token/renew-self`</dd>
+
+  <dt>Parameters</dt>
   <dd>
     <ul>
       <li>
@@ -398,30 +505,37 @@ of the header should be "X-Vault-Token" and the value should be the token.
   </dd>
 </dl>
 
-### /auth/token/revoke-self/
+### /auth/token/revoke-accessor[/accessor]
 #### POST
 
 <dl class="api">
   <dt>Description</dt>
   <dd>
-    Revokes the token used to call it and all child tokens.
-    When the token is revoked, all secrets generated with
-    it are also revoked.
+      Revoke the token associated with the accessor and all the child tokens.
+      This is meant for purposes where there is no access to token ID but
+      there is need to revoke a token and its children.
   </dd>
 
   <dt>Method</dt>
   <dd>POST</dd>
 
   <dt>URL</dt>
-  <dd>`/auth/token/revoke-self`</dd>
+  <dd>`/auth/token/revoke-accessor</accessor>`</dd>
 
   <dt>Parameters</dt>
   <dd>
-    None
+    <ul>
+      <li>
+        <span class="param">accessor</span>
+        <span class="param-flags">required</span>
+            Accessor of the token. This can be part of the URL or the body.
+      </li>
+    </ul>
   </dd>
 
   <dt>Returns</dt>
-  <dd>`204` response code.
+  <dd>
+    A `204` response code.
   </dd>
 </dl>
 
@@ -459,6 +573,33 @@ of the header should be "X-Vault-Token" and the value should be the token.
   </dd>
 </dl>
 
+### /auth/token/revoke-self/
+#### POST
+
+<dl class="api">
+  <dt>Description</dt>
+  <dd>
+    Revokes the token used to call it and all child tokens.
+    When the token is revoked, all dynamic secrets generated
+    with it are also revoked.
+  </dd>
+
+  <dt>Method</dt>
+  <dd>POST</dd>
+
+  <dt>URL</dt>
+  <dd>`/auth/token/revoke-self`</dd>
+
+  <dt>Parameters</dt>
+  <dd>
+    None
+  </dd>
+
+  <dt>Returns</dt>
+  <dd>`204` response code.
+  </dd>
+</dl>
+
 ### /auth/token/roles/[role_name]
 
 #### DELETE 
@@ -470,7 +611,7 @@ of the header should be "X-Vault-Token" and the value should be the token.
   </dd>
 
   <dt>Method</dt>
-  <dd>GET</dd>
+  <dd>DELETE</dd>
 
   <dt>URL</dt>
   <dd>`/auth/token/roles/<role_name>`</dd>
@@ -509,14 +650,25 @@ of the header should be "X-Vault-Token" and the value should be the token.
   <dd>
 
     ```javascript
-    {
-      "data": {
-        "period": 3600,
-        "allowed_policies": ["web", "stage"],
-        "orphan": true,
-        "path_suffix": ""
-      }
-    }
+{
+        "request_id": "075a19cd-4e56-a3ca-d956-7609819831ec",
+        "lease_id": "",
+        "lease_duration": 0,
+        "renewable": false,
+        "data": {
+                "allowed_policies": [
+                        "dev"
+                ],
+                "disallowed_policies": [],
+                "explicit_max_ttl": 0,
+                "name": "nomad",
+                "orphan": false,
+                "path_suffix": "",
+                "period": 0,
+                "renewable": true
+        },
+        "warnings": null
+}
     ```
 
   </dd>
@@ -531,10 +683,10 @@ of the header should be "X-Vault-Token" and the value should be the token.
   </dd>
 
   <dt>Method</dt>
-  <dd>GET</dd>
+  <dd>LIST/GET</dd>
 
   <dt>URL</dt>
-  <dd>`/auth/token/roles?list=true`<dd>
+  <dd>`/auth/token/roles` (LIST) or `/auth/token/roles?list=true` (GET)<dd>
 
   <dt>Parameters</dt>
   <dd>
@@ -584,7 +736,16 @@ of the header should be "X-Vault-Token" and the value should be the token.
         If set, tokens can be created with any subset of the policies in this
         list, rather than the normal semantics of tokens being a subset of the
         calling token's policies. The parameter is a comma-delimited string of
-        policy names.
+        policy names. If this and `disallowed_policies` are both set, only this
+        option takes effect.
+      </li>
+      <li>
+        <span class="param">disallowed_policies</span>
+        <span class="param-flags">optional</span>
+        If set, successful token creation via this role will require that
+        no policies in the given list are requested. If both `disallowed_policies`
+        and `allowed_policies` are set, this option has no effect. The parameter
+        is a comma-delimited string of policy names.
       </li>
       <li>
         <span class="param">orphan</span>
@@ -599,8 +760,16 @@ of the header should be "X-Vault-Token" and the value should be the token.
         If set, tokens created against this role will <i>not</i> have a maximum
         lifetime. Instead, they will have a fixed TTL that is refreshed with
         each renewal. So long as they continue to be renewed, they will never
-        expire. The parameter is an integer duration of seconds or a duration
-        string (e.g. `"72h"`).
+        expire. The parameter is an integer duration of seconds. Tokens issued
+        track updates to the role value; the new period takes effect upon next
+        renew. This cannot be used in conjunction with `explicit_max_ttl`.
+      </li>
+      <li>
+        <span class="param">renewable</span>
+        <span class="param-flags">optional</span>
+        Set to `false` to disable the ability of token created against this
+        role to be renewed past their initial TTL. Defaults to `true`, which
+        allows tokens to be renewed up to the system/mount maximum TTL.
       </li>
       <li>
         <span class="param">path_suffix</span>
@@ -613,100 +782,22 @@ of the header should be "X-Vault-Token" and the value should be the token.
         part of their path, and then tokens with the old suffix can be revoked
         via `sys/revoke-prefix`.
       </li>
+      <li>
+        <span class="param">explicit_max_ttl</span>
+        <span class="param-flags">optional</span>
+        If set, tokens created with this role have an explicit max TTL set upon
+        them. This maximum token TTL *cannot* be changed later, and unlike with
+        normal tokens, updates to the role or the system/mount max TTL value
+        will have no effect at renewal time -- the token will never be able to
+        be renewed or used past the value set at issue time. This cannot be
+        used in conjunction with `period`.
+      </li>
     </ul>
   </dd>
 
   <dt>Returns</dt>
   <dd>
     A `204` return code.
-  </dd>
-</dl>
-
-### /auth/token/lookup-accessor[/accessor]
-#### POST
-
-<dl class="api">
-  <dt>Description</dt>
-  <dd>
-      Fetch the properties of the token associated with the accessor, except the token ID.
-      This is meant for purposes where there is no access to token ID but there is need
-      to fetch the properties of a token.
-  </dd>
-
-  <dt>Method</dt>
-  <dd>POST</dd>
-
-  <dt>URL</dt>
-  <dd>`/auth/token/lookup-accessor</accessor>`</dd>
-
-  <dt>Parameters</dt>
-  <dd>
-    <ul>
-      <li>
-        <span class="param">accessor</span>
-        <span class="param-flags">required</span>
-            Accessor of the token to lookup. This can be part of the URL or the body.
-      </li>
-    </ul>
-  </dd>
-
-  <dt>Returns</dt>
-  <dd>
-
-    ```javascript
-   {
-	"lease_id": "",
-	"renewable": false,
-	"lease_duration": 0,
-	"data": {
-		"creation_time": 1457533232,
-		"creation_ttl": 2592000,
-		"display_name": "token",
-		"id": "",
-		"meta": null,
-		"num_uses": 0,
-		"orphan": false,
-		"path": "auth/token/create",
-		"policies": ["default", "web"],
-		"ttl": 2591976
-	},
-	"warnings": null,
-	"auth": null
-   }
-    ```
-  </dd>
-</dl>
-
-### /auth/token/revoke-accessor[/accessor]
-#### POST
-
-<dl class="api">
-  <dt>Description</dt>
-  <dd>
-      Revoke the token associated with the accessor and all the child tokens.
-      This is meant for purposes where there is no access to token ID but
-      there is need to revoke a token and its children.
-  </dd>
-
-  <dt>Method</dt>
-  <dd>POST</dd>
-
-  <dt>URL</dt>
-  <dd>`/auth/token/revoke-accessor</accessor>`</dd>
-
-  <dt>Parameters</dt>
-  <dd>
-    <ul>
-      <li>
-        <span class="param">accessor</span>
-        <span class="param-flags">required</span>
-            Accessor of the token. This can be part of the URL or the body.
-      </li>
-    </ul>
-  </dd>
-
-  <dt>Returns</dt>
-  <dd>`204` response code.
   </dd>
 </dl>
 

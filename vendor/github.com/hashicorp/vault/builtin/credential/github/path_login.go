@@ -46,9 +46,9 @@ func (b *backend) pathLogin(
 		return nil, err
 	}
 
-	ttl, _, err := b.SanitizeTTL(config.TTL.String(), config.MaxTTL.String())
+	ttl, _, err := b.SanitizeTTLStr(config.TTL.String(), config.MaxTTL.String())
 	if err != nil {
-		return logical.ErrorResponse(fmt.Sprintf("[ERR]:%s", err)), nil
+		return logical.ErrorResponse(fmt.Sprintf("error sanitizing TTLs: %s", err)), nil
 	}
 
 	return &logical.Response{
@@ -73,7 +73,15 @@ func (b *backend) pathLogin(
 func (b *backend) pathLoginRenew(
 	req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 
-	token := req.Auth.InternalData["token"].(string)
+	if req.Auth == nil {
+		return nil, fmt.Errorf("request auth was nil")
+	}
+
+	tokenRaw, ok := req.Auth.InternalData["token"]
+	if !ok {
+		return nil, fmt.Errorf("token created in previous version of Vault cannot be validated properly at renewal time")
+	}
+	token := tokenRaw.(string)
 
 	var verifyResp *verifyCredentialsResp
 	if verifyResponse, resp, err := b.verifyCredentials(req, token); err != nil {
@@ -84,7 +92,7 @@ func (b *backend) pathLoginRenew(
 		verifyResp = verifyResponse
 	}
 	if !policyutil.EquivalentPolicies(verifyResp.Policies, req.Auth.Policies) {
-		return logical.ErrorResponse("policies do not match"), nil
+		return nil, fmt.Errorf("policies do not match")
 	}
 
 	config, err := b.Config(req.Storage)
@@ -130,7 +138,7 @@ func (b *backend) verifyCredentials(req *logical.Request, token string) (*verify
 		PerPage: 100,
 	}
 
-	var allOrgs []github.Organization
+	var allOrgs []*github.Organization
 	for {
 		orgs, resp, err := client.Organizations.List("", orgOpt)
 		if err != nil {
@@ -145,7 +153,7 @@ func (b *backend) verifyCredentials(req *logical.Request, token string) (*verify
 
 	for _, o := range allOrgs {
 		if strings.ToLower(*o.Login) == strings.ToLower(config.Org) {
-			org = &o
+			org = o
 			break
 		}
 	}
@@ -160,7 +168,7 @@ func (b *backend) verifyCredentials(req *logical.Request, token string) (*verify
 		PerPage: 100,
 	}
 
-	var allTeams []github.Team
+	var allTeams []*github.Team
 	for {
 		teams, resp, err := client.Organizations.ListUserTeams(teamOpt)
 		if err != nil {
@@ -186,14 +194,22 @@ func (b *backend) verifyCredentials(req *logical.Request, token string) (*verify
 		}
 	}
 
-	policiesList, err := b.Map.Policies(req.Storage, teamNames...)
+	groupPoliciesList, err := b.TeamMap.Policies(req.Storage, teamNames...)
+
 	if err != nil {
 		return nil, nil, err
 	}
+
+	userPoliciesList, err := b.UserMap.Policies(req.Storage, []string{*user.Login}...)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return &verifyCredentialsResp{
 		User:     user,
 		Org:      org,
-		Policies: policiesList,
+		Policies: append(groupPoliciesList, userPoliciesList...),
 	}, nil, nil
 }
 

@@ -2,6 +2,8 @@ package ldap
 
 import (
 	"fmt"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -10,9 +12,24 @@ import (
 	"github.com/mitchellh/mapstructure"
 )
 
+/*
+ * Acceptance test for LDAP Auth Backend
+ *
+ * The tests here rely on a public LDAP server:
+ * [http://www.forumsys.com/tutorials/integration-how-to/ldap/online-ldap-test-server/]
+ *
+ * ...as well as existence of a person object, `uid=tesla,dc=example,dc=com`,
+ *    which is a member of a group, `ou=scientists,dc=example,dc=com`
+ *
+ * Querying the server from the command line:
+ *   $ ldapsearch -x -H ldap://ldap.forumsys.com -b dc=example,dc=com -s sub \
+ *       '(&(objectClass=groupOfUniqueNames)(uniqueMember=uid=tesla,dc=example,dc=com))'
+ *
+ *   $ ldapsearch -x -H ldap://ldap.forumsys.com -b dc=example,dc=com -s sub uid=tesla
+ */
 func factory(t *testing.T) logical.Backend {
 	defaultLeaseTTLVal := time.Hour * 24
-	maxLeaseTTLVal := time.Hour * 24 * 30
+	maxLeaseTTLVal := time.Hour * 24 * 32
 	b, err := Factory(&logical.BackendConfig{
 		Logger: nil,
 		System: &logical.StaticSystemView{
@@ -34,10 +51,23 @@ func TestBackend_basic(t *testing.T) {
 		Backend:        b,
 		Steps: []logicaltest.TestStep{
 			testAccStepConfigUrl(t),
-			testAccStepGroup(t, "scientists", "foo"),
+			// Map Scientists group (from LDAP server) with foo policy
+			testAccStepGroup(t, "Scientists", "foo"),
+
+			// Map engineers group (local) with bar policy
 			testAccStepGroup(t, "engineers", "bar"),
+
+			// Map tesla user with local engineers group
 			testAccStepUser(t, "tesla", "engineers"),
+
+			// Authenticate
 			testAccStepLogin(t, "tesla", "password"),
+
+			// Verify both groups mappings can be listed back
+			testAccStepGroupList(t, []string{"engineers", "Scientists"}),
+
+			// Verify user mapping can be listed back
+			testAccStepUserList(t, []string{"tesla"}),
 		},
 	})
 }
@@ -50,7 +80,7 @@ func TestBackend_basic_authbind(t *testing.T) {
 		Backend:        b,
 		Steps: []logicaltest.TestStep{
 			testAccStepConfigUrlWithAuthBind(t),
-			testAccStepGroup(t, "scientists", "foo"),
+			testAccStepGroup(t, "Scientists", "foo"),
 			testAccStepGroup(t, "engineers", "bar"),
 			testAccStepUser(t, "tesla", "engineers"),
 			testAccStepLogin(t, "tesla", "password"),
@@ -66,7 +96,7 @@ func TestBackend_basic_discover(t *testing.T) {
 		Backend:        b,
 		Steps: []logicaltest.TestStep{
 			testAccStepConfigUrlWithDiscover(t),
-			testAccStepGroup(t, "scientists", "foo"),
+			testAccStepGroup(t, "Scientists", "foo"),
 			testAccStepGroup(t, "engineers", "bar"),
 			testAccStepUser(t, "tesla", "engineers"),
 			testAccStepLogin(t, "tesla", "password"),
@@ -82,7 +112,7 @@ func TestBackend_basic_nogroupdn(t *testing.T) {
 		Backend:        b,
 		Steps: []logicaltest.TestStep{
 			testAccStepConfigUrlNoGroupDN(t),
-			testAccStepGroup(t, "scientists", "foo"),
+			testAccStepGroup(t, "Scientists", "foo"),
 			testAccStepGroup(t, "engineers", "bar"),
 			testAccStepUser(t, "tesla", "engineers"),
 			testAccStepLoginNoGroupDN(t, "tesla", "password"),
@@ -98,9 +128,56 @@ func TestBackend_groupCrud(t *testing.T) {
 		Backend:        b,
 		Steps: []logicaltest.TestStep{
 			testAccStepGroup(t, "g1", "foo"),
-			testAccStepReadGroup(t, "g1", "foo"),
+			testAccStepReadGroup(t, "g1", "default,foo"),
 			testAccStepDeleteGroup(t, "g1"),
 			testAccStepReadGroup(t, "g1", ""),
+		},
+	})
+}
+
+/*
+ * Test backend configuration defaults are successfully read.
+ */
+func TestBackend_configDefaultsAfterUpdate(t *testing.T) {
+	b := factory(t)
+
+	logicaltest.Test(t, logicaltest.TestCase{
+		AcceptanceTest: false,
+		Backend:        b,
+		Steps: []logicaltest.TestStep{
+			logicaltest.TestStep{
+				Operation: logical.UpdateOperation,
+				Path:      "config",
+				Data:      map[string]interface{}{},
+			},
+			logicaltest.TestStep{
+				Operation: logical.ReadOperation,
+				Path:      "config",
+				Check: func(resp *logical.Response) error {
+					if resp == nil {
+						return fmt.Errorf("bad: %#v", resp)
+					}
+
+					// Test well-known defaults
+					cfg := resp.Data
+					defaultGroupFilter := "(|(memberUid={{.Username}})(member={{.UserDN}})(uniqueMember={{.UserDN}}))"
+					if cfg["groupfilter"] != defaultGroupFilter {
+						t.Errorf("Default mismatch: groupfilter. Expected: '%s', received :'%s'", defaultGroupFilter, cfg["groupfilter"])
+					}
+
+					defaultGroupAttr := "cn"
+					if cfg["groupattr"] != defaultGroupAttr {
+						t.Errorf("Default mismatch: groupattr. Expected: '%s', received :'%s'", defaultGroupAttr, cfg["groupattr"])
+					}
+
+					defaultUserAttr := "cn"
+					if cfg["userattr"] != defaultUserAttr {
+						t.Errorf("Default mismatch: userattr. Expected: '%s', received :'%s'", defaultUserAttr, cfg["userattr"])
+					}
+
+					return nil
+				},
+			},
 		},
 	})
 }
@@ -169,6 +246,7 @@ func testAccStepConfigUrlNoGroupDN(t *testing.T) logicaltest.TestStep {
 }
 
 func testAccStepGroup(t *testing.T, group string, policies string) logicaltest.TestStep {
+	t.Logf("[testAccStepGroup] - Registering group %s, policy %s", group, policies)
 	return logicaltest.TestStep{
 		Operation: logical.UpdateOperation,
 		Path:      "groups/" + group,
@@ -282,6 +360,7 @@ func testAccStepLogin(t *testing.T, user string, pass string) logicaltest.TestSt
 		},
 		Unauthenticated: true,
 
+		// Verifies user tesla maps to groups via local group (engineers) as well as remote group (Scientiests)
 		Check: logicaltest.TestCheckAuth([]string{"bar", "default", "foo"}),
 	}
 }
@@ -295,6 +374,7 @@ func testAccStepLoginNoGroupDN(t *testing.T, user string, pass string) logicalte
 		},
 		Unauthenticated: true,
 
+		// Verifies a search without defined GroupDN returns a warnting rather than failing
 		Check: func(resp *logical.Response) error {
 			if len(resp.Warnings()) != 1 {
 				return fmt.Errorf("expected a warning due to no group dn, got: %#v", resp.Warnings())
@@ -319,5 +399,55 @@ func TestLDAPEscape(t *testing.T) {
 		if res != answer {
 			t.Errorf("Failed to escape %s: %s != %s\n", test, res, answer)
 		}
+	}
+}
+
+func testAccStepGroupList(t *testing.T, groups []string) logicaltest.TestStep {
+	return logicaltest.TestStep{
+		Operation: logical.ListOperation,
+		Path:      "groups",
+		Check: func(resp *logical.Response) error {
+			if resp.IsError() {
+				return fmt.Errorf("Got error response: %#v", *resp)
+			}
+
+			expected := make([]string, len(groups))
+			copy(expected, groups)
+			sort.Strings(expected)
+
+			sortedResponse := make([]string, len(resp.Data["keys"].([]string)))
+			copy(sortedResponse, resp.Data["keys"].([]string))
+			sort.Strings(sortedResponse)
+
+			if !reflect.DeepEqual(expected, sortedResponse) {
+				return fmt.Errorf("expected:\n%#v\ngot:\n%#v\n", expected, sortedResponse)
+			}
+			return nil
+		},
+	}
+}
+
+func testAccStepUserList(t *testing.T, users []string) logicaltest.TestStep {
+	return logicaltest.TestStep{
+		Operation: logical.ListOperation,
+		Path:      "users",
+		Check: func(resp *logical.Response) error {
+			if resp.IsError() {
+				return fmt.Errorf("Got error response: %#v", *resp)
+			}
+
+			expected := make([]string, len(users))
+			copy(expected, users)
+			sort.Strings(expected)
+
+			sortedResponse := make([]string, len(resp.Data["keys"].([]string)))
+			copy(sortedResponse, resp.Data["keys"].([]string))
+			sort.Strings(sortedResponse)
+
+			if !reflect.DeepEqual(expected, sortedResponse) {
+				return fmt.Errorf("expected:\n%#v\ngot:\n%#v\n", expected, sortedResponse)
+			}
+			return nil
+		},
 	}
 }

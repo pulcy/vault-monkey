@@ -1,16 +1,17 @@
 package vault
 
 import (
-	"log"
-	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/audit"
+	"github.com/hashicorp/vault/helper/logformat"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/physical"
+	log "github.com/mgutz/logxi/v1"
 )
 
 var (
@@ -18,12 +19,13 @@ var (
 	invalidKey = []byte("abcdefghijklmnopqrstuvwxyz")[:17]
 )
 
-func TestNewCore_badAdvertiseAddr(t *testing.T) {
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+func TestNewCore_badRedirectAddr(t *testing.T) {
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	conf := &CoreConfig{
-		AdvertiseAddr: "127.0.0.1:8200",
-		Physical:      physical.NewInmem(logger),
-		DisableMlock:  true,
+		RedirectAddr: "127.0.0.1:8200",
+		Physical:     physical.NewInmem(logger),
+		DisableMlock: true,
 	}
 	_, err := NewCore(conf)
 	if err == nil {
@@ -45,7 +47,7 @@ func TestSealConfig_Invalid(t *testing.T) {
 func TestCore_Unseal_MultiShare(t *testing.T) {
 	c := TestCore(t)
 
-	_, err := c.Unseal(invalidKey)
+	_, err := TestCoreUnseal(c, invalidKey)
 	if err != ErrNotInit {
 		t.Fatalf("err: %v", err)
 	}
@@ -54,7 +56,10 @@ func TestCore_Unseal_MultiShare(t *testing.T) {
 		SecretShares:    5,
 		SecretThreshold: 3,
 	}
-	res, err := c.Initialize(sealConf, nil)
+	res, err := c.Initialize(&InitParams{
+		BarrierConfig:  sealConf,
+		RecoveryConfig: nil,
+	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -72,13 +77,13 @@ func TestCore_Unseal_MultiShare(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		unseal, err := c.Unseal(res.SecretShares[i])
+		unseal, err := TestCoreUnseal(c, res.SecretShares[i])
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
 
 		// Ignore redundant
-		_, err = c.Unseal(res.SecretShares[i])
+		_, err = TestCoreUnseal(c, res.SecretShares[i])
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -130,7 +135,7 @@ func TestCore_Unseal_MultiShare(t *testing.T) {
 func TestCore_Unseal_Single(t *testing.T) {
 	c := TestCore(t)
 
-	_, err := c.Unseal(invalidKey)
+	_, err := TestCoreUnseal(c, invalidKey)
 	if err != ErrNotInit {
 		t.Fatalf("err: %v", err)
 	}
@@ -139,7 +144,10 @@ func TestCore_Unseal_Single(t *testing.T) {
 		SecretShares:    1,
 		SecretThreshold: 1,
 	}
-	res, err := c.Initialize(sealConf, nil)
+	res, err := c.Initialize(&InitParams{
+		BarrierConfig:  sealConf,
+		RecoveryConfig: nil,
+	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -156,7 +164,7 @@ func TestCore_Unseal_Single(t *testing.T) {
 		t.Fatalf("bad progress: %d", prog)
 	}
 
-	unseal, err := c.Unseal(res.SecretShares[0])
+	unseal, err := TestCoreUnseal(c, res.SecretShares[0])
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -194,12 +202,15 @@ func TestCore_Route_Sealed(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	res, err := c.Initialize(sealConf, nil)
+	res, err := c.Initialize(&InitParams{
+		BarrierConfig:  sealConf,
+		RecoveryConfig: nil,
+	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	unseal, err := c.Unseal(res.SecretShares[0])
+	unseal, err := TestCoreUnseal(c, res.SecretShares[0])
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -221,7 +232,7 @@ func TestCore_SealUnseal(t *testing.T) {
 	if err := c.Seal(root); err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if unseal, err := c.Unseal(key); err != nil || !unseal {
+	if unseal, err := TestCoreUnseal(c, key); err != nil || !unseal {
 		t.Fatalf("err: %v", err)
 	}
 }
@@ -384,7 +395,7 @@ func TestCore_HandleRequest_MissingToken(t *testing.T) {
 		},
 	}
 	resp, err := c.HandleRequest(req)
-	if err != logical.ErrInvalidRequest {
+	if err == nil || !errwrap.Contains(err, logical.ErrInvalidRequest.Error()) {
 		t.Fatalf("err: %v", err)
 	}
 	if resp.Data["error"] != "missing client token" {
@@ -405,7 +416,7 @@ func TestCore_HandleRequest_InvalidToken(t *testing.T) {
 		ClientToken: "foobarbaz",
 	}
 	resp, err := c.HandleRequest(req)
-	if err != logical.ErrPermissionDenied {
+	if err == nil || !errwrap.Contains(err, logical.ErrPermissionDenied.Error()) {
 		t.Fatalf("err: %v", err)
 	}
 	if resp.Data["error"] != "permission denied" {
@@ -442,7 +453,7 @@ func TestCore_HandleRequest_RootPath(t *testing.T) {
 		ClientToken: "child",
 	}
 	resp, err := c.HandleRequest(req)
-	if err != logical.ErrPermissionDenied {
+	if err == nil || !errwrap.Contains(err, logical.ErrPermissionDenied.Error()) {
 		t.Fatalf("err: %v, resp: %v", err, resp)
 	}
 }
@@ -499,7 +510,7 @@ func TestCore_HandleRequest_PermissionDenied(t *testing.T) {
 		ClientToken: "child",
 	}
 	resp, err := c.HandleRequest(req)
-	if err != logical.ErrPermissionDenied {
+	if err == nil || !errwrap.Contains(err, logical.ErrPermissionDenied.Error()) {
 		t.Fatalf("err: %v, resp: %v", err, resp)
 	}
 }
@@ -867,7 +878,7 @@ func TestCore_HandleRequest_CreateToken_Lease(t *testing.T) {
 		Path:         "auth/token/create",
 		DisplayName:  "token",
 		CreationTime: te.CreationTime,
-		TTL:          time.Hour * 24 * 30,
+		TTL:          time.Hour * 24 * 32,
 	}
 	if !reflect.DeepEqual(te, expect) {
 		t.Fatalf("Bad: %#v expect: %#v", te, expect)
@@ -912,7 +923,7 @@ func TestCore_HandleRequest_CreateToken_NoDefaultPolicy(t *testing.T) {
 		Path:         "auth/token/create",
 		DisplayName:  "token",
 		CreationTime: te.CreationTime,
-		TTL:          time.Hour * 24 * 30,
+		TTL:          time.Hour * 24 * 32,
 	}
 	if !reflect.DeepEqual(te, expect) {
 		t.Fatalf("Bad: %#v expect: %#v", te, expect)
@@ -947,28 +958,29 @@ func TestCore_LimitedUseToken(t *testing.T) {
 
 	// Second operation should fail
 	_, err = c.HandleRequest(req)
-	if err != logical.ErrPermissionDenied {
+	if err == nil || !errwrap.Contains(err, logical.ErrPermissionDenied.Error()) {
 		t.Fatalf("err: %v", err)
 	}
 }
 
 func TestCore_Standby_Seal(t *testing.T) {
 	// Create the first core and initialize it
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	inm := physical.NewInmem(logger)
 	inmha := physical.NewInmemHA(logger)
-	advertiseOriginal := "http://127.0.0.1:8200"
+	redirectOriginal := "http://127.0.0.1:8200"
 	core, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	key, root := TestCoreInit(t, core)
-	if _, err := core.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -982,7 +994,7 @@ func TestCore_Standby_Seal(t *testing.T) {
 	}
 
 	// Wait for core to become active
-	testWaitActive(t, core)
+	TestWaitActive(t, core)
 
 	// Check the leader is local
 	isLeader, advertise, err := core.Leader()
@@ -992,22 +1004,22 @@ func TestCore_Standby_Seal(t *testing.T) {
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
 	// Create the second core and initialize it
-	advertiseOriginal2 := "http://127.0.0.1:8500"
+	redirectOriginal2 := "http://127.0.0.1:8500"
 	core2, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal2,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal2,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, err := core2.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core2, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1037,7 +1049,7 @@ func TestCore_Standby_Seal(t *testing.T) {
 	if isLeader {
 		t.Fatalf("should not be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1060,21 +1072,22 @@ func TestCore_Standby_Seal(t *testing.T) {
 
 func TestCore_StepDown(t *testing.T) {
 	// Create the first core and initialize it
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	inm := physical.NewInmem(logger)
 	inmha := physical.NewInmemHA(logger)
-	advertiseOriginal := "http://127.0.0.1:8200"
+	redirectOriginal := "http://127.0.0.1:8200"
 	core, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	key, root := TestCoreInit(t, core)
-	if _, err := core.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1088,7 +1101,7 @@ func TestCore_StepDown(t *testing.T) {
 	}
 
 	// Wait for core to become active
-	testWaitActive(t, core)
+	TestWaitActive(t, core)
 
 	// Check the leader is local
 	isLeader, advertise, err := core.Leader()
@@ -1098,22 +1111,22 @@ func TestCore_StepDown(t *testing.T) {
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
 	// Create the second core and initialize it
-	advertiseOriginal2 := "http://127.0.0.1:8500"
+	redirectOriginal2 := "http://127.0.0.1:8500"
 	core2, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal2,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal2,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, err := core2.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core2, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1143,18 +1156,29 @@ func TestCore_StepDown(t *testing.T) {
 	if isLeader {
 		t.Fatalf("should not be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
+	req := &logical.Request{
+		ClientToken: root,
+		Path:        "sys/step-down",
+	}
+
+	// Create an identifier for the request
+	req.ID, err = uuid.GenerateUUID()
+	if err != nil {
+		t.Fatalf("failed to generate identifier for the request: path: %s err: %v", req.Path, err)
+	}
+
 	// Step down core
-	err = core.StepDown(root)
+	err = core.StepDown(req)
 	if err != nil {
 		t.Fatal("error stepping down core 1")
 	}
 
 	// Give time to switch leaders
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// Core1 should be in standby
 	standby, err = core.Standby()
@@ -1173,7 +1197,7 @@ func TestCore_StepDown(t *testing.T) {
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal2 {
+	if advertise != redirectOriginal2 {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1185,12 +1209,12 @@ func TestCore_StepDown(t *testing.T) {
 	if isLeader {
 		t.Fatalf("should not be leader")
 	}
-	if advertise != advertiseOriginal2 {
+	if advertise != redirectOriginal2 {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
 	// Step down core2
-	err = core2.StepDown(root)
+	err = core2.StepDown(req)
 	if err != nil {
 		t.Fatal("error stepping down core 1")
 	}
@@ -1216,7 +1240,7 @@ func TestCore_StepDown(t *testing.T) {
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1228,28 +1252,29 @@ func TestCore_StepDown(t *testing.T) {
 	if isLeader {
 		t.Fatalf("should not be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 }
 
 func TestCore_CleanLeaderPrefix(t *testing.T) {
 	// Create the first core and initialize it
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	inm := physical.NewInmem(logger)
 	inmha := physical.NewInmemHA(logger)
-	advertiseOriginal := "http://127.0.0.1:8200"
+	redirectOriginal := "http://127.0.0.1:8200"
 	core, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	key, root := TestCoreInit(t, core)
-	if _, err := core.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1263,7 +1288,7 @@ func TestCore_CleanLeaderPrefix(t *testing.T) {
 	}
 
 	// Wait for core to become active
-	testWaitActive(t, core)
+	TestWaitActive(t, core)
 
 	// Ensure that the original clean function has stopped running
 	time.Sleep(2 * time.Second)
@@ -1300,22 +1325,22 @@ func TestCore_CleanLeaderPrefix(t *testing.T) {
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
 	// Create a second core, attached to same in-memory store
-	advertiseOriginal2 := "http://127.0.0.1:8500"
+	redirectOriginal2 := "http://127.0.0.1:8500"
 	core2, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal2,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal2,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, err := core2.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core2, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1345,7 +1370,7 @@ func TestCore_CleanLeaderPrefix(t *testing.T) {
 	if isLeader {
 		t.Fatalf("should not be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1365,7 +1390,7 @@ func TestCore_CleanLeaderPrefix(t *testing.T) {
 	}
 
 	// Wait for core2 to become active
-	testWaitActive(t, core2)
+	TestWaitActive(t, core2)
 
 	// Check the leader is local
 	isLeader, advertise, err = core2.Leader()
@@ -1375,7 +1400,7 @@ func TestCore_CleanLeaderPrefix(t *testing.T) {
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal2 {
+	if advertise != redirectOriginal2 {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1392,30 +1417,32 @@ func TestCore_CleanLeaderPrefix(t *testing.T) {
 }
 
 func TestCore_Standby(t *testing.T) {
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	inmha := physical.NewInmemHA(logger)
 	testCore_Standby_Common(t, inmha, inmha)
 }
 
 func TestCore_Standby_SeparateHA(t *testing.T) {
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	testCore_Standby_Common(t, physical.NewInmemHA(logger), physical.NewInmemHA(logger))
 }
 
 func testCore_Standby_Common(t *testing.T, inm physical.Backend, inmha physical.HABackend) {
 	// Create the first core and initialize it
-	advertiseOriginal := "http://127.0.0.1:8200"
+	redirectOriginal := "http://127.0.0.1:8200"
 	core, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	key, root := TestCoreInit(t, core)
-	if _, err := core.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1429,7 +1456,7 @@ func testCore_Standby_Common(t *testing.T, inm physical.Backend, inmha physical.
 	}
 
 	// Wait for core to become active
-	testWaitActive(t, core)
+	TestWaitActive(t, core)
 
 	// Put a secret
 	req := &logical.Request{
@@ -1453,22 +1480,22 @@ func testCore_Standby_Common(t *testing.T, inm physical.Backend, inmha physical.
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
 	// Create a second core, attached to same in-memory store
-	advertiseOriginal2 := "http://127.0.0.1:8500"
+	redirectOriginal2 := "http://127.0.0.1:8500"
 	core2, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal2,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal2,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, err := core2.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core2, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1504,7 +1531,7 @@ func testCore_Standby_Common(t *testing.T, inm physical.Backend, inmha physical.
 	if isLeader {
 		t.Fatalf("should not be leader")
 	}
-	if advertise != advertiseOriginal {
+	if advertise != redirectOriginal {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1524,7 +1551,7 @@ func testCore_Standby_Common(t *testing.T, inm physical.Backend, inmha physical.
 	}
 
 	// Wait for core2 to become active
-	testWaitActive(t, core2)
+	TestWaitActive(t, core2)
 
 	// Read the secret
 	req = &logical.Request{
@@ -1550,7 +1577,7 @@ func testCore_Standby_Common(t *testing.T, inm physical.Backend, inmha physical.
 	if !isLeader {
 		t.Fatalf("should be leader")
 	}
-	if advertise != advertiseOriginal2 {
+	if advertise != redirectOriginal2 {
 		t.Fatalf("Bad advertise: %v", advertise)
 	}
 
@@ -1765,8 +1792,11 @@ func TestCore_RenewToken_SingleRegister(t *testing.T) {
 	newClient := resp.Auth.ClientToken
 
 	// Renew the token
-	req = logical.TestRequest(t, logical.UpdateOperation, "auth/token/renew/"+newClient)
+	req = logical.TestRequest(t, logical.UpdateOperation, "auth/token/renew")
 	req.ClientToken = newClient
+	req.Data = map[string]interface{}{
+		"token": newClient,
+	}
 	resp, err = c.HandleRequest(req)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -1781,7 +1811,10 @@ func TestCore_RenewToken_SingleRegister(t *testing.T) {
 	}
 
 	// Verify our token is still valid (e.g. we did not get invalided by the revoke)
-	req = logical.TestRequest(t, logical.ReadOperation, "auth/token/lookup/"+newClient)
+	req = logical.TestRequest(t, logical.UpdateOperation, "auth/token/lookup")
+	req.Data = map[string]interface{}{
+		"token": newClient,
+	}
 	req.ClientToken = newClient
 	resp, err = c.HandleRequest(req)
 	if err != nil {
@@ -1796,7 +1829,6 @@ func TestCore_RenewToken_SingleRegister(t *testing.T) {
 
 // Based on bug GH-203, attempt to disable a credential backend with leased secrets
 func TestCore_EnableDisableCred_WithLease(t *testing.T) {
-	// Create a badass credential backend that always logs in as armon
 	noopBack := &NoopBackend{
 		Login: []string{"login"},
 		Response: &logical.Response{
@@ -1805,9 +1837,23 @@ func TestCore_EnableDisableCred_WithLease(t *testing.T) {
 			},
 		},
 	}
+
 	c, _, root := TestCoreUnsealed(t)
 	c.credentialBackends["noop"] = func(*logical.BackendConfig) (logical.Backend, error) {
 		return noopBack, nil
+	}
+
+	var secretWritingPolicy = `
+name = "admins"
+path "secret/*" {
+	capabilities = ["update", "create", "read"]
+}
+`
+
+	ps := c.policyStore
+	policy, _ := Parse(secretWritingPolicy)
+	if err := ps.SetPolicy(policy); err != nil {
+		t.Fatal(err)
 	}
 
 	// Enable the credential backend
@@ -1819,11 +1865,21 @@ func TestCore_EnableDisableCred_WithLease(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	// Attempt to login
+	// Attempt to login -- should fail because we don't allow root to be returned
 	lreq := &logical.Request{
 		Path: "auth/foo/login",
 	}
 	lresp, err := c.HandleRequest(lreq)
+	if err == nil || lresp == nil || !lresp.IsError() {
+		t.Fatalf("expected error trying to auth and receive root policy")
+	}
+
+	// Fix and try again
+	noopBack.Response.Auth.Policies = []string{"admins"}
+	lreq = &logical.Request{
+		Path: "auth/foo/login",
+	}
+	lresp, err = c.HandleRequest(lreq)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1858,7 +1914,10 @@ func TestCore_EnableDisableCred_WithLease(t *testing.T) {
 	}
 
 	// Renew the lease
-	req = logical.TestRequest(t, logical.UpdateOperation, "sys/renew/"+resp.Secret.LeaseID)
+	req = logical.TestRequest(t, logical.UpdateOperation, "sys/renew")
+	req.Data = map[string]interface{}{
+		"lease_id": resp.Secret.LeaseID,
+	}
 	req.ClientToken = lresp.Auth.ClientToken
 	_, err = c.HandleRequest(req)
 	if err != nil {
@@ -1867,7 +1926,7 @@ func TestCore_EnableDisableCred_WithLease(t *testing.T) {
 
 	// Disable the credential backend
 	req = logical.TestRequest(t, logical.DeleteOperation, "sys/auth/foo")
-	req.ClientToken = lresp.Auth.ClientToken
+	req.ClientToken = root
 	resp, err = c.HandleRequest(req)
 	if err != nil {
 		t.Fatalf("err: %v %#v", err, resp)
@@ -1913,59 +1972,42 @@ func TestCore_HandleRequest_MountPoint(t *testing.T) {
 	}
 }
 
-func testWaitActive(t *testing.T, core *Core) {
-	start := time.Now()
-	var standby bool
-	var err error
-	for time.Now().Sub(start) < time.Second {
-		standby, err = core.Standby()
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if !standby {
-			break
-		}
-	}
-	if standby {
-		t.Fatalf("should not be in standby mode")
-	}
-}
-
 func TestCore_Standby_Rotate(t *testing.T) {
 	// Create the first core and initialize it
-	logger = log.New(os.Stderr, "", log.LstdFlags)
+	logger = logformat.NewVaultLogger(log.LevelTrace)
+
 	inm := physical.NewInmem(logger)
 	inmha := physical.NewInmemHA(logger)
-	advertiseOriginal := "http://127.0.0.1:8200"
+	redirectOriginal := "http://127.0.0.1:8200"
 	core, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	key, root := TestCoreInit(t, core)
-	if _, err := core.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
 	// Wait for core to become active
-	testWaitActive(t, core)
+	TestWaitActive(t, core)
 
 	// Create a second core, attached to same in-memory store
-	advertiseOriginal2 := "http://127.0.0.1:8500"
+	redirectOriginal2 := "http://127.0.0.1:8500"
 	core2, err := NewCore(&CoreConfig{
-		Physical:      inm,
-		HAPhysical:    inmha,
-		AdvertiseAddr: advertiseOriginal2,
-		DisableMlock:  true,
+		Physical:     inm,
+		HAPhysical:   inmha,
+		RedirectAddr: redirectOriginal2,
+		DisableMlock: true,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if _, err := core2.Unseal(TestKeyCopy(key)); err != nil {
+	if _, err := TestCoreUnseal(core2, TestKeyCopy(key)); err != nil {
 		t.Fatalf("unseal err: %s", err)
 	}
 
@@ -1987,7 +2029,7 @@ func TestCore_Standby_Rotate(t *testing.T) {
 	}
 
 	// Wait for core2 to become active
-	testWaitActive(t, core2)
+	TestWaitActive(t, core2)
 
 	// Read the key status
 	req = &logical.Request{

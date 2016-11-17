@@ -29,13 +29,27 @@ These libraries are officially maintained by HashiCorp.
 
 These libraries are provided by the community.
 
+### Ansible
+
+* [Ansible Modules Hashivault](https://pypi.python.org/pypi/ansible-modules-hashivault)
+  * `pip install ansible-modules-hashivault`
+
 ### C&#35;
 
 * [VaultSharp](https://github.com/rajanadar/VaultSharp)
   * `Install-Package VaultSharp`
 
+### Clojure
+
+* [vault-clj](https://github.com/amperity/vault-clj)
+
+### Elixir
+
+* [vaultex](https://hex.pm/packages/vaultex)
+
 ### Java
 
+* [Spring Vault](https://github.com/spring-projects/spring-vault)
 * [vault-java](https://github.com/jhaals/vault-java)
 * [vault-java-driver](https://github.com/BetterCloud/vault-java-driver)
 
@@ -59,3 +73,6 @@ These libraries are provided by the community.
 
 * [HVAC](https://github.com/ianunruh/hvac)
   * `pip install hvac`
+
+### Scala
+ * [scala-vault](https://github.com/janstenpickle/scala-vault)

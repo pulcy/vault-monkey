@@ -1,16 +1,18 @@
 package physical
 
 import (
-	"log"
-	"os"
 	"reflect"
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/vault/helper/logformat"
+	log "github.com/mgutz/logxi/v1"
 )
 
 func testNewBackend(t *testing.T) {
-	logger := log.New(os.Stderr, "", log.LstdFlags)
+	logger := logformat.NewVaultLogger(log.LevelTrace)
+
 	_, err := NewBackend("foobar", logger, nil)
 	if err == nil {
 		t.Fatalf("expected error")
@@ -122,6 +124,18 @@ func testBackend(t *testing.T, b Backend) {
 		t.Fatalf("err: %v", err)
 	}
 
+	keys, err = b.List("")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("bad: %v", keys)
+	}
+	sort.Strings(keys)
+	if keys[0] != "foo" || keys[1] != "foo/" {
+		t.Fatalf("bad: %v", keys)
+	}
+
 	// Delete with children should work
 	err = b.Delete("foo")
 	if err != nil {
@@ -135,6 +149,70 @@ func testBackend(t *testing.T, b Backend) {
 	}
 	if out == nil {
 		t.Fatalf("missing child")
+	}
+
+	// Removal of nested secret should not leave artifacts
+	e = &Entry{Key: "foo/nested1/nested2/nested3", Value: []byte("baz")}
+	err = b.Put(e)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	err = b.Delete("foo/nested1/nested2/nested3")
+	if err != nil {
+		t.Fatalf("failed to remove nested secret: %v", err)
+	}
+
+	keys, err = b.List("foo/")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if len(keys) != 1 {
+		t.Fatalf("there should be only one key left after deleting nested "+
+			"secret: %v", keys)
+	}
+
+	if keys[0] != "bar" {
+		t.Fatalf("bad keys after deleting nested: %v", keys)
+	}
+
+	// Make a second nested entry to test prefix removal
+	e = &Entry{Key: "foo/zip", Value: []byte("zap")}
+	err = b.Put(e)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	// Delete should not remove the prefix
+	err = b.Delete("foo/bar")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	keys, err = b.List("")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("bad: %v", keys)
+	}
+	if keys[0] != "foo/" {
+		t.Fatalf("bad: %v", keys)
+	}
+
+	// Delete should remove the prefix
+	err = b.Delete("foo/zip")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	keys, err = b.List("")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("bad: %v", keys)
 	}
 }
 

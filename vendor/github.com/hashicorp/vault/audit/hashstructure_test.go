@@ -18,7 +18,7 @@ func TestCopy_auth(t *testing.T) {
 	expected := logical.Auth{
 		LeaseOptions: logical.LeaseOptions{
 			TTL:       1 * time.Hour,
-			IssueTime: time.Now().UTC(),
+			IssueTime: time.Now(),
 		},
 
 		ClientToken: "foo",
@@ -44,6 +44,7 @@ func TestCopy_request(t *testing.T) {
 		Data: map[string]interface{}{
 			"foo": "bar",
 		},
+		WrapTTL: 60 * time.Second,
 	}
 	arg := expected
 
@@ -65,6 +66,12 @@ func TestCopy_response(t *testing.T) {
 	expected := logical.Response{
 		Data: map[string]interface{}{
 			"foo": "bar",
+		},
+		WrapInfo: &logical.WrapInfo{
+			TTL:             60,
+			Token:           "foo",
+			CreationTime:    time.Now(),
+			WrappedAccessor: "abcd1234",
 		},
 	}
 	arg := expected
@@ -102,7 +109,7 @@ func TestHashString(t *testing.T) {
 }
 
 func TestHash(t *testing.T) {
-	now := time.Now().UTC()
+	now := time.Now()
 
 	cases := []struct {
 		Input  interface{}
@@ -131,10 +138,22 @@ func TestHash(t *testing.T) {
 				Data: map[string]interface{}{
 					"foo": "bar",
 				},
+				WrapInfo: &logical.WrapInfo{
+					TTL:             60,
+					Token:           "bar",
+					CreationTime:    now,
+					WrappedAccessor: "bar",
+				},
 			},
 			&logical.Response{
 				Data: map[string]interface{}{
 					"foo": "hmac-sha256:f9320baf0249169e73850cd6156ded0106e2bb6ad8cab01b7bbbebe6d1065317",
+				},
+				WrapInfo: &logical.WrapInfo{
+					TTL:             60,
+					Token:           "hmac-sha256:f9320baf0249169e73850cd6156ded0106e2bb6ad8cab01b7bbbebe6d1065317",
+					CreationTime:    now,
+					WrappedAccessor: "hmac-sha256:f9320baf0249169e73850cd6156ded0106e2bb6ad8cab01b7bbbebe6d1065317",
 				},
 			},
 		},

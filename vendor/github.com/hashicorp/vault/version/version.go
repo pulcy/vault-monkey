@@ -5,17 +5,14 @@ import (
 	"fmt"
 )
 
-// The git commit that was compiled. This will be filled in by the compiler.
-var GitCommit string
-var GitDescribe string
+var (
+	// The git commit that was compiled. This will be filled in by the compiler.
+	GitCommit   string
+	GitDescribe string
 
-// The main version number that is being run at the moment.
-const Version = "0.5.3"
-
-// A pre-release marker for the version. If this is "" (empty string)
-// then it means that it is a final release. Otherwise, this is a pre-release
-// such as "dev" (in development), "beta", "rc1", etc.
-const VersionPrerelease = "dev"
+	Version           = "unknown"
+	VersionPrerelease = "unknown"
+)
 
 // VersionInfo
 type VersionInfo struct {
@@ -41,8 +38,26 @@ func GetVersion() *VersionInfo {
 	}
 }
 
-func (c *VersionInfo) String() string {
+func (c *VersionInfo) VersionNumber() string {
+	if Version == "unknown" && VersionPrerelease == "unknown" {
+		return "(version unknown)"
+	}
+
+	version := fmt.Sprintf("%s", c.Version)
+
+	if c.VersionPrerelease != "" {
+		version = fmt.Sprintf("%s-%s", version, c.VersionPrerelease)
+	}
+
+	return version
+}
+
+func (c *VersionInfo) FullVersionNumber() string {
 	var versionString bytes.Buffer
+
+	if Version == "unknown" && VersionPrerelease == "unknown" {
+		return "Vault (version unknown)"
+	}
 
 	fmt.Fprintf(&versionString, "Vault v%s", c.Version)
 	if c.VersionPrerelease != "" {

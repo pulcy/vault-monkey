@@ -3,8 +3,10 @@ package transit
 import (
 	"encoding/base64"
 	"fmt"
+	"sync"
 
-	"github.com/hashicorp/vault/helper/certutil"
+	"github.com/hashicorp/vault/helper/errutil"
+	"github.com/hashicorp/vault/helper/keysutil"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 )
@@ -27,6 +29,35 @@ func (b *backend) pathEncrypt() *framework.Path {
 				Type:        framework.TypeString,
 				Description: "Context for key derivation. Required for derived keys.",
 			},
+
+			"nonce": &framework.FieldSchema{
+				Type:        framework.TypeString,
+				Description: "Nonce for when convergent encryption is used",
+			},
+
+			"type": &framework.FieldSchema{
+				Type:    framework.TypeString,
+				Default: "aes256-gcm96",
+				Description: `When performing an upsert operation, the type of key
+to create. Currently, "aes256-gcm96" (symmetric) is the
+only type supported. Defaults to "aes256-gcm96".`,
+			},
+
+			"convergent_encryption": &framework.FieldSchema{
+				Type: framework.TypeBool,
+				Description: `Whether to support convergent encryption.
+This is only supported when using a key with
+key derivation enabled and will require all
+requests to carry both a context and 96-bit
+(12-byte) nonce. The given nonce will be used
+in place of a randomly generated nonce. As a
+result, when the same context and nonce are
+supplied, the same ciphertext is generated. It
+is *very important* when using this mode that
+you ensure that all nonces are unique for a
+given context. Failing to do so will severely
+impact the ciphertext's security.`,
+			},
 		},
 
 		Callbacks: map[logical.Operation]framework.OperationFunc{
@@ -44,70 +75,95 @@ func (b *backend) pathEncrypt() *framework.Path {
 func (b *backend) pathEncryptExistenceCheck(
 	req *logical.Request, d *framework.FieldData) (bool, error) {
 	name := d.Get("name").(string)
-	lp, err := b.policies.getPolicy(req, name)
+	p, lock, err := b.lm.GetPolicyShared(req.Storage, name)
+	if lock != nil {
+		defer lock.RUnlock()
+	}
 	if err != nil {
 		return false, err
 	}
-
-	return lp != nil, nil
+	return p != nil, nil
 }
 
 func (b *backend) pathEncryptWrite(
 	req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get("name").(string)
-	value := d.Get("plaintext").(string)
-	if len(value) == 0 {
+
+	valueRaw, ok := d.GetOk("plaintext")
+	if !ok {
 		return logical.ErrorResponse("missing plaintext to encrypt"), logical.ErrInvalidRequest
 	}
+	value := valueRaw.(string)
 
 	// Decode the context if any
 	contextRaw := d.Get("context").(string)
 	var context []byte
+	var err error
 	if len(contextRaw) != 0 {
-		var err error
 		context, err = base64.StdEncoding.DecodeString(contextRaw)
 		if err != nil {
-			return logical.ErrorResponse("failed to decode context as base64"), logical.ErrInvalidRequest
+			return logical.ErrorResponse("failed to base64-decode context"), logical.ErrInvalidRequest
+		}
+	}
+
+	// Decode the nonce if any
+	nonceRaw := d.Get("nonce").(string)
+	var nonce []byte
+	if len(nonceRaw) != 0 {
+		nonce, err = base64.StdEncoding.DecodeString(nonceRaw)
+		if err != nil {
+			return logical.ErrorResponse("failed to base64-decode nonce"), logical.ErrInvalidRequest
 		}
 	}
 
 	// Get the policy
-	lp, err := b.policies.getPolicy(req, name)
+	var p *keysutil.Policy
+	var lock *sync.RWMutex
+	var upserted bool
+	if req.Operation == logical.CreateOperation {
+		convergent := d.Get("convergent_encryption").(bool)
+		if convergent && len(context) == 0 {
+			return logical.ErrorResponse("convergent encryption requires derivation to be enabled, so context is required"), nil
+		}
+
+		polReq := keysutil.PolicyRequest{
+			Storage:    req.Storage,
+			Name:       name,
+			Derived:    len(context) != 0,
+			Convergent: convergent,
+		}
+
+		keyType := d.Get("type").(string)
+		switch keyType {
+		case "aes256-gcm96":
+			polReq.KeyType = keysutil.KeyType_AES256_GCM96
+		case "ecdsa-p256":
+			return logical.ErrorResponse(fmt.Sprintf("key type %v not supported for this operation", keyType)), logical.ErrInvalidRequest
+		default:
+			return logical.ErrorResponse(fmt.Sprintf("unknown key type %v", keyType)), logical.ErrInvalidRequest
+		}
+
+		p, lock, upserted, err = b.lm.GetPolicyUpsert(polReq)
+
+	} else {
+		p, lock, err = b.lm.GetPolicyShared(req.Storage, name)
+	}
+	if lock != nil {
+		defer lock.RUnlock()
+	}
 	if err != nil {
 		return nil, err
 	}
-
-	// Error if invalid policy
-	if lp == nil {
-		if req.Operation != logical.CreateOperation {
-			return logical.ErrorResponse("policy not found"), logical.ErrInvalidRequest
-		}
-
-		isDerived := len(context) != 0
-
-		lp, err = b.policies.generatePolicy(req.Storage, name, isDerived)
-		// If the error is that the policy has been created in the interim we
-		// will get the policy back, so only consider it an error if err is not
-		// nil and we do not get a policy back
-		if err != nil && lp != nil {
-			return nil, err
-		}
+	if p == nil {
+		return logical.ErrorResponse("policy not found"), logical.ErrInvalidRequest
 	}
 
-	lp.RLock()
-	defer lp.RUnlock()
-
-	// Verify if wasn't deleted before we grabbed the lock
-	if lp.policy == nil {
-		return nil, fmt.Errorf("no existing policy named %s could be found", name)
-	}
-
-	ciphertext, err := lp.policy.Encrypt(context, value)
+	ciphertext, err := p.Encrypt(context, nonce, value)
 	if err != nil {
 		switch err.(type) {
-		case certutil.UserError:
+		case errutil.UserError:
 			return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
-		case certutil.InternalError:
+		case errutil.InternalError:
 			return nil, err
 		default:
 			return nil, err
@@ -124,6 +180,11 @@ func (b *backend) pathEncryptWrite(
 			"ciphertext": ciphertext,
 		},
 	}
+
+	if req.Operation == logical.CreateOperation && !upserted {
+		resp.AddWarning("Attempted creation of the key during the encrypt operation, but it was created beforehand")
+	}
+
 	return resp, nil
 }
 

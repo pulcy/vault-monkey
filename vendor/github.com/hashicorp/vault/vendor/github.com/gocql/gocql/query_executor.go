@@ -24,11 +24,11 @@ func (q *queryExecutor) executeQuery(qry ExecutableQuery) (*Iter, error) {
 	var iter *Iter
 	for hostResponse := hostIter(); hostResponse != nil; hostResponse = hostIter() {
 		host := hostResponse.Info()
-		if !host.IsUp() {
+		if host == nil || !host.IsUp() {
 			continue
 		}
 
-		pool, ok := q.pool.getPool(host.Peer())
+		pool, ok := q.pool.getPool(host)
 		if !ok {
 			continue
 		}

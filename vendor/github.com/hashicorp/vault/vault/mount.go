@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-uuid"
+	"github.com/hashicorp/vault/helper/jsonutil"
 	"github.com/hashicorp/vault/logical"
 )
 
@@ -25,6 +26,10 @@ const (
 	// systemBarrierPrefix is the prefix used for the
 	// system logical backend.
 	systemBarrierPrefix = "sys/"
+
+	// mountTableType is the value we expect to find for the mount table and
+	// corresponding entries
+	mountTableType = "mounts"
 )
 
 var (
@@ -55,15 +60,17 @@ var (
 
 // MountTable is used to represent the internal mount table
 type MountTable struct {
+	Type    string        `json:"type"`
 	Entries []*MountEntry `json:"entries"`
 }
 
-// ShallowClone returns a copy of the mount table that
+// shallowClone returns a copy of the mount table that
 // keeps the MountEntry locations, so as not to invalidate
 // other locations holding pointers. Care needs to be taken
 // if modifying entries rather than modifying the table itself
-func (t *MountTable) ShallowClone() *MountTable {
+func (t *MountTable) shallowClone() *MountTable {
 	mt := &MountTable{
+		Type:    t.Type,
 		Entries: make([]*MountEntry, len(t.Entries)),
 	}
 	for i, e := range t.Entries {
@@ -82,19 +89,8 @@ func (t *MountTable) Hash() ([]byte, error) {
 	return hash[:], nil
 }
 
-// Find is used to lookup an entry
-func (t *MountTable) Find(path string) *MountEntry {
-	n := len(t.Entries)
-	for i := 0; i < n; i++ {
-		if t.Entries[i].Path == path {
-			return t.Entries[i]
-		}
-	}
-	return nil
-}
-
-// SetTaint is used to set the taint on given entry
-func (t *MountTable) SetTaint(path string, value bool) bool {
+// setTaint is used to set the taint on given entry
+func (t *MountTable) setTaint(path string, value bool) bool {
 	n := len(t.Entries)
 	for i := 0; i < n; i++ {
 		if t.Entries[i].Path == path {
@@ -105,21 +101,23 @@ func (t *MountTable) SetTaint(path string, value bool) bool {
 	return false
 }
 
-// Remove is used to remove a given path entry
-func (t *MountTable) Remove(path string) bool {
+// remove is used to remove a given path entry; returns the entry that was
+// removed
+func (t *MountTable) remove(path string) *MountEntry {
 	n := len(t.Entries)
 	for i := 0; i < n; i++ {
-		if t.Entries[i].Path == path {
+		if entry := t.Entries[i]; entry.Path == path {
 			t.Entries[i], t.Entries[n-1] = t.Entries[n-1], nil
 			t.Entries = t.Entries[:n-1]
-			return true
+			return entry
 		}
 	}
-	return false
+	return nil
 }
 
 // MountEntry is used to represent a mount table entry
 type MountEntry struct {
+	Table       string            `json:"table"`             // The table it belongs to
 	Path        string            `json:"path"`              // Mount Path
 	Type        string            `json:"type"`              // Logical backend Type
 	Description string            `json:"description"`       // User-provided description
@@ -142,6 +140,7 @@ func (e *MountEntry) Clone() *MountEntry {
 		optClone[k] = v
 	}
 	return &MountEntry{
+		Table:       e.Table,
 		Path:        e.Path,
 		Type:        e.Type,
 		Description: e.Description,
@@ -177,9 +176,6 @@ func (c *Core) mount(me *MountEntry) error {
 		return logical.CodedError(409, fmt.Sprintf("existing mount at %s", match))
 	}
 
-	c.mountsLock.Lock()
-	defer c.mountsLock.Unlock()
-
 	// Generate a new UUID and view
 	meUUID, err := uuid.GenerateUUID()
 	if err != nil {
@@ -194,23 +190,29 @@ func (c *Core) mount(me *MountEntry) error {
 	}
 
 	// Update the mount table
-	newTable := c.mounts.ShallowClone()
+	c.mountsLock.Lock()
+	newTable := c.mounts.shallowClone()
 	newTable.Entries = append(newTable.Entries, me)
 	if err := c.persistMounts(newTable); err != nil {
-		return errors.New("failed to update mount table")
+		c.mountsLock.Unlock()
+		return logical.CodedError(500, "failed to update mount table")
 	}
 	c.mounts = newTable
+	c.mountsLock.Unlock()
 
 	// Mount the backend
 	if err := c.router.Mount(backend, me.Path, me, view); err != nil {
 		return err
 	}
-	c.logger.Printf("[INFO] core: mounted '%s' type: %s", me.Path, me.Type)
+	if c.logger.IsInfo() {
+		c.logger.Info("core: successful mount", "path", me.Path, "type", me.Type)
+	}
 	return nil
 }
 
-// Unmount is used to unmount a path.
-func (c *Core) unmount(path string) error {
+// Unmount is used to unmount a path. The boolean indicates whether the mount
+// was found.
+func (c *Core) unmount(path string) (bool, error) {
 	// Ensure we end the path in a slash
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
@@ -219,69 +221,72 @@ func (c *Core) unmount(path string) error {
 	// Prevent protected paths from being unmounted
 	for _, p := range protectedMounts {
 		if strings.HasPrefix(path, p) {
-			return fmt.Errorf("cannot unmount '%s'", path)
+			return true, fmt.Errorf("cannot unmount '%s'", path)
 		}
 	}
 
 	// Verify exact match of the route
 	match := c.router.MatchingMount(path)
 	if match == "" || path != match {
-		return fmt.Errorf("no matching mount")
+		return false, fmt.Errorf("no matching mount")
 	}
 
-	// Store the view for this backend
+	// Get the view for this backend
 	view := c.router.MatchingStorageView(path)
-
-	c.mountsLock.Lock()
-	defer c.mountsLock.Unlock()
 
 	// Mark the entry as tainted
 	if err := c.taintMountEntry(path); err != nil {
-		return err
+		return true, err
 	}
 
-	// Taint the router path to prevent routing
+	// Taint the router path to prevent routing. Note that in-flight requests
+	// are uncertain, right now.
 	if err := c.router.Taint(path); err != nil {
-		return err
+		return true, err
 	}
 
 	// Invoke the rollback manager a final time
 	if err := c.rollback.Rollback(path); err != nil {
-		return err
+		return true, err
 	}
 
 	// Revoke all the dynamic keys
 	if err := c.expiration.RevokePrefix(path); err != nil {
-		return err
+		return true, err
 	}
 
 	// Unmount the backend entirely
 	if err := c.router.Unmount(path); err != nil {
-		return err
+		return true, err
 	}
 
 	// Clear the data in the view
 	if err := ClearView(view); err != nil {
-		return err
+		return true, err
 	}
 
 	// Remove the mount table entry
 	if err := c.removeMountEntry(path); err != nil {
-		return err
+		return true, err
 	}
-	c.logger.Printf("[INFO] core: unmounted '%s'", path)
-	return nil
+	if c.logger.IsInfo() {
+		c.logger.Info("core: successful unmounted", "path", path)
+	}
+	return true, nil
 }
 
 // removeMountEntry is used to remove an entry from the mount table
 func (c *Core) removeMountEntry(path string) error {
+	c.mountsLock.Lock()
+	defer c.mountsLock.Unlock()
+
 	// Remove the entry from the mount table
-	newTable := c.mounts.ShallowClone()
-	newTable.Remove(path)
+	newTable := c.mounts.shallowClone()
+	newTable.remove(path)
 
 	// Update the mount table
 	if err := c.persistMounts(newTable); err != nil {
-		return errors.New("failed to update mount table")
+		return logical.CodedError(500, "failed to update mount table")
 	}
 
 	c.mounts = newTable
@@ -290,13 +295,16 @@ func (c *Core) removeMountEntry(path string) error {
 
 // taintMountEntry is used to mark an entry in the mount table as tainted
 func (c *Core) taintMountEntry(path string) error {
+	c.mountsLock.Lock()
+	defer c.mountsLock.Unlock()
+
 	// As modifying the taint of an entry affects shallow clones,
 	// we simply use the original
-	c.mounts.SetTaint(path, true)
+	c.mounts.setTaint(path, true)
 
 	// Update the mount table
 	if err := c.persistMounts(c.mounts); err != nil {
-		return errors.New("failed to update mount table")
+		return logical.CodedError(500, "failed to update mount table")
 	}
 
 	return nil
@@ -329,9 +337,6 @@ func (c *Core) remount(src, dst string) error {
 		return fmt.Errorf("existing mount at '%s'", match)
 	}
 
-	c.mountsLock.Lock()
-	defer c.mountsLock.Unlock()
-
 	// Mark the entry as tainted
 	if err := c.taintMountEntry(src); err != nil {
 		return err
@@ -352,6 +357,7 @@ func (c *Core) remount(src, dst string) error {
 		return err
 	}
 
+	c.mountsLock.Lock()
 	var ent *MountEntry
 	for _, ent = range c.mounts.Entries {
 		if ent.Path == src {
@@ -365,8 +371,10 @@ func (c *Core) remount(src, dst string) error {
 	if err := c.persistMounts(c.mounts); err != nil {
 		ent.Path = src
 		ent.Tainted = true
-		return errors.New("failed to update mount table")
+		c.mountsLock.Unlock()
+		return logical.CodedError(500, "failed to update mount table")
 	}
+	c.mountsLock.Unlock()
 
 	// Remount the backend
 	if err := c.router.Remount(src, dst); err != nil {
@@ -378,7 +386,9 @@ func (c *Core) remount(src, dst string) error {
 		return err
 	}
 
-	c.logger.Printf("[INFO] core: remounted '%s' to '%s'", src, dst)
+	if c.logger.IsInfo() {
+		c.logger.Info("core: successful remount", "old_path", src, "new_path", dst)
+	}
 	return nil
 }
 
@@ -388,7 +398,7 @@ func (c *Core) loadMounts() error {
 	// Load the existing mount table
 	raw, err := c.barrier.Get(coreMountConfigPath)
 	if err != nil {
-		c.logger.Printf("[ERR] core: failed to read mount table: %v", err)
+		c.logger.Error("core: failed to read mount table", "error", err)
 		return errLoadMountsFailed
 	}
 
@@ -396,9 +406,12 @@ func (c *Core) loadMounts() error {
 	defer c.mountsLock.Unlock()
 
 	if raw != nil {
-		if err := json.Unmarshal(raw.Value, mountTable); err != nil {
-			c.logger.Printf("[ERR] core: failed to decode mount table: %v", err)
-			return errLoadMountsFailed
+		// Check if the persisted value has canary in the beginning. If
+		// yes, decompress the table and then JSON decode it. If not,
+		// simply JSON decode it.
+		if err := jsonutil.DecodeJSON(raw.Value, mountTable); err != nil {
+			c.logger.Error("core: failed to decompress and/or decode the mount table", "error", err)
+			return err
 		}
 		c.mounts = mountTable
 	}
@@ -409,6 +422,13 @@ func (c *Core) loadMounts() error {
 	// by type only.
 	if c.mounts != nil {
 		needPersist := false
+
+		// Upgrade to typed mount table
+		if c.mounts.Type == "" {
+			c.mounts.Type = mountTableType
+			needPersist = true
+		}
+
 		for _, requiredMount := range requiredMountTable().Entries {
 			foundRequired := false
 			for _, coreMount := range c.mounts.Entries {
@@ -419,6 +439,14 @@ func (c *Core) loadMounts() error {
 			}
 			if !foundRequired {
 				c.mounts.Entries = append(c.mounts.Entries, requiredMount)
+				needPersist = true
+			}
+		}
+
+		// Upgrade to table-scoped entries
+		for _, entry := range c.mounts.Entries {
+			if entry.Table == "" {
+				entry.Table = c.mounts.Type
 				needPersist = true
 			}
 		}
@@ -441,22 +469,34 @@ func (c *Core) loadMounts() error {
 
 // persistMounts is used to persist the mount table after modification
 func (c *Core) persistMounts(table *MountTable) error {
-	// Marshal the table
-	raw, err := json.Marshal(table)
+	if table.Type != mountTableType {
+		c.logger.Error("core: given table to persist has wrong type", "actual_type", table.Type, "expected_type", mountTableType)
+		return fmt.Errorf("invalid table type given, not persisting")
+	}
+
+	for _, entry := range table.Entries {
+		if entry.Table != table.Type {
+			c.logger.Error("core: given entry to persist in mount table has wrong table value", "path", entry.Path, "entry_table_type", entry.Table, "actual_type", table.Type)
+			return fmt.Errorf("invalid mount entry found, not persisting")
+		}
+	}
+
+	// Encode the mount table into JSON and compress it (lzw).
+	compressedBytes, err := jsonutil.EncodeJSONAndCompress(table, nil)
 	if err != nil {
-		c.logger.Printf("[ERR] core: failed to encode mount table: %v", err)
+		c.logger.Error("core: failed to encode and/or compress the mount table", "error", err)
 		return err
 	}
 
 	// Create an entry
 	entry := &Entry{
 		Key:   coreMountConfigPath,
-		Value: raw,
+		Value: compressedBytes,
 	}
 
 	// Write to the physical backend
 	if err := c.barrier.Put(entry); err != nil {
-		c.logger.Printf("[ERR] core: failed to persist mount table: %v", err)
+		c.logger.Error("core: failed to persist mount table", "error", err)
 		return err
 	}
 	return nil
@@ -486,9 +526,7 @@ func (c *Core) setupMounts() error {
 		// Create the new backend
 		backend, err = c.newLogicalBackend(entry.Type, c.mountEntrySysView(entry), view, nil)
 		if err != nil {
-			c.logger.Printf(
-				"[ERR] core: failed to create mount entry %s: %v",
-				entry.Path, err)
+			c.logger.Error("core: failed to create mount entry", "path", entry.Path, "error", err)
 			return errLoadMountsFailed
 		}
 
@@ -504,10 +542,12 @@ func (c *Core) setupMounts() error {
 		// Mount the backend
 		err = c.router.Mount(backend, entry.Path, entry, view)
 		if err != nil {
-			c.logger.Printf("[ERR] core: failed to mount entry %s: %v", entry.Path, err)
+			c.logger.Error("core: failed to mount entry", "path", entry.Path, "error", err)
 			return errLoadMountsFailed
 		} else {
-			c.logger.Printf("[INFO] core: mounted backend of type %s at %s", entry.Type, entry.Path)
+			if c.logger.IsInfo() {
+				c.logger.Info("core: successfully mounted backend", "type", entry.Type, "path", entry.Path)
+			}
 		}
 
 		// Ensure the path is tainted if set in the mount table
@@ -525,7 +565,7 @@ func (c *Core) unloadMounts() error {
 	defer c.mountsLock.Unlock()
 
 	if c.mounts != nil {
-		mountTable := c.mounts.ShallowClone()
+		mountTable := c.mounts.shallowClone()
 		for _, e := range mountTable.Entries {
 			prefix := e.Path
 			b, ok := c.router.root.Get(prefix)
@@ -574,12 +614,15 @@ func (c *Core) mountEntrySysView(me *MountEntry) logical.SystemView {
 
 // defaultMountTable creates a default mount table
 func defaultMountTable() *MountTable {
-	table := &MountTable{}
+	table := &MountTable{
+		Type: mountTableType,
+	}
 	mountUUID, err := uuid.GenerateUUID()
 	if err != nil {
 		panic(fmt.Sprintf("could not create default mount table UUID: %v", err))
 	}
 	genericMount := &MountEntry{
+		Table:       mountTableType,
 		Path:        "secret/",
 		Type:        "generic",
 		Description: "generic secret storage",
@@ -593,12 +636,15 @@ func defaultMountTable() *MountTable {
 // requiredMountTable() creates a mount table with entries required
 // to be available
 func requiredMountTable() *MountTable {
-	table := &MountTable{}
+	table := &MountTable{
+		Type: mountTableType,
+	}
 	cubbyholeUUID, err := uuid.GenerateUUID()
 	if err != nil {
 		panic(fmt.Sprintf("could not create cubbyhole UUID: %v", err))
 	}
 	cubbyholeMount := &MountEntry{
+		Table:       mountTableType,
 		Path:        "cubbyhole/",
 		Type:        "cubbyhole",
 		Description: "per-token private secret storage",
@@ -610,6 +656,7 @@ func requiredMountTable() *MountTable {
 		panic(fmt.Sprintf("could not create sys UUID: %v", err))
 	}
 	sysMount := &MountEntry{
+		Table:       mountTableType,
 		Path:        "sys/",
 		Type:        "system",
 		Description: "system endpoints used for control, policy and debugging",

@@ -156,9 +156,12 @@ func (b *backend) userCreateUpdate(req *logical.Request, d *framework.FieldData)
 	}
 
 	if _, ok := d.GetOk("password"); ok {
-		err = b.updateUserPassword(req, d, userEntry)
-		if err != nil {
+		userErr, intErr := b.updateUserPassword(req, d, userEntry)
+		if intErr != nil {
 			return nil, err
+		}
+		if userErr != nil {
+			return logical.ErrorResponse(userErr.Error()), logical.ErrInvalidRequest
 		}
 	}
 
@@ -176,7 +179,7 @@ func (b *backend) userCreateUpdate(req *logical.Request, d *framework.FieldData)
 		maxTTLStr = maxTTLStrRaw.(string)
 	}
 
-	userEntry.TTL, userEntry.MaxTTL, err = b.SanitizeTTL(ttlStr, maxTTLStr)
+	userEntry.TTL, userEntry.MaxTTL, err = b.SanitizeTTLStr(ttlStr, maxTTLStr)
 	if err != nil {
 		return logical.ErrorResponse(fmt.Sprintf("err: %s", err)), nil
 	}
@@ -195,7 +198,7 @@ func (b *backend) pathUserWrite(
 
 type UserEntry struct {
 	// Password is deprecated in Vault 0.2 in favor of
-	// PasswordHash, but is retained for backwards compatibilty.
+	// PasswordHash, but is retained for backwards compatibility.
 	Password string
 
 	// PasswordHash is a bcrypt hash of the password. This is

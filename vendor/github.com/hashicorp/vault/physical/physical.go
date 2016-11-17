@@ -2,7 +2,9 @@ package physical
 
 import (
 	"fmt"
-	"log"
+	"sync"
+
+	log "github.com/mgutz/logxi/v1"
 )
 
 const DefaultParallelOperations = 128
@@ -31,38 +33,47 @@ type Backend interface {
 	List(prefix string) ([]string, error)
 }
 
-// HABackend is an extentions to the standard physical
+// HABackend is an extensions to the standard physical
 // backend to support high-availability. Vault only expects to
 // use mutual exclusion to allow multiple instances to act as a
 // hot standby for a leader that services all requests.
 type HABackend interface {
 	// LockWith is used for mutual exclusion based on the given key.
 	LockWith(key, value string) (Lock, error)
+
+	// Whether or not HA functionality is enabled
+	HAEnabled() bool
 }
 
-// AdvertiseDetect is an optional interface that an HABackend
-// can implement. If they do, an advertise address can be automatically
+// RedirectDetect is an optional interface that an HABackend
+// can implement. If they do, a redirect address can be automatically
 // detected.
-type AdvertiseDetect interface {
+type RedirectDetect interface {
 	// DetectHostAddr is used to detect the host address
 	DetectHostAddr() (string, error)
 }
+
+// Callback signatures for RunServiceDiscovery
+type activeFunction func() bool
+type sealedFunction func() bool
 
 // ServiceDiscovery is an optional interface that an HABackend can implement.
 // If they do, the state of a backend is advertised to the service discovery
 // network.
 type ServiceDiscovery interface {
-	// AdvertiseActive is used to reflect whether or not a backend is in
-	// an active or standby state.
-	AdvertiseActive(bool) error
+	// NotifyActiveStateChange is used by Core to notify a backend
+	// capable of ServiceDiscovery that this Vault instance has changed
+	// its status to active or standby.
+	NotifyActiveStateChange() error
 
-	// AdvertiseSealed is used to reflect whether or not a backend is in
-	// a sealed state or not.
-	AdvertiseSealed(bool) error
+	// NotifySealedStateChange is used by Core to notify a backend
+	// capable of ServiceDiscovery that Vault has changed its Sealed
+	// status to sealed or unsealed.
+	NotifySealedStateChange() error
 
 	// Run executes any background service discovery tasks until the
 	// shutdown channel is closed.
-	RunServiceDiscovery(shutdownCh ShutdownChannel, advertiseAddr string) error
+	RunServiceDiscovery(waitGroup *sync.WaitGroup, shutdownCh ShutdownChannel, redirectAddr string, activeFunc activeFunction, sealedFunc sealedFunction) error
 }
 
 type Lock interface {
@@ -86,11 +97,11 @@ type Entry struct {
 }
 
 // Factory is the factory function to create a physical backend.
-type Factory func(config map[string]string, logger *log.Logger) (Backend, error)
+type Factory func(config map[string]string, logger log.Logger) (Backend, error)
 
 // NewBackend returns a new backend with the given type and configuration.
 // The backend is looked up in the builtinBackends variable.
-func NewBackend(t string, logger *log.Logger, conf map[string]string) (Backend, error) {
+func NewBackend(t string, logger log.Logger, conf map[string]string) (Backend, error) {
 	f, ok := builtinBackends[t]
 	if !ok {
 		return nil, fmt.Errorf("unknown physical backend type: %s", t)
@@ -101,8 +112,11 @@ func NewBackend(t string, logger *log.Logger, conf map[string]string) (Backend, 
 // BuiltinBackends is the list of built-in physical backends that can
 // be used with NewBackend.
 var builtinBackends = map[string]Factory{
-	"inmem": func(_ map[string]string, logger *log.Logger) (Backend, error) {
+	"inmem": func(_ map[string]string, logger log.Logger) (Backend, error) {
 		return NewInmem(logger), nil
+	},
+	"inmem_ha": func(_ map[string]string, logger log.Logger) (Backend, error) {
+		return NewInmemHA(logger), nil
 	},
 	"consul":     newConsulBackend,
 	"zookeeper":  newZookeeperBackend,
@@ -113,6 +127,7 @@ var builtinBackends = map[string]Factory{
 	"etcd":       newEtcdBackend,
 	"mysql":      newMySQLBackend,
 	"postgresql": newPostgreSQLBackend,
+	"swift":      newSwiftBackend,
 }
 
 // PermitPool is a wrapper around a semaphore library to keep things

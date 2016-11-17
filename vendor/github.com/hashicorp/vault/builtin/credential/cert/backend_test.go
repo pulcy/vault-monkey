@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hashicorp/vault/api"
+	"github.com/hashicorp/go-rootcerts"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 	logicaltest "github.com/hashicorp/vault/logical/testing"
@@ -52,7 +52,10 @@ func connectionState(t *testing.T, serverCAPath, serverCertPath, serverKeyPath, 
 		t.Fatal(err)
 	}
 	// Load the CA cert required by the client to authenticate the server.
-	serverCAs, err := api.LoadCACert(serverCAPath)
+	rootConfig := &rootcerts.Config{
+		CAFile: serverCAPath,
+	}
+	serverCAs, err := rootcerts.LoadCACerts(rootConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +101,86 @@ func connectionState(t *testing.T, serverCAPath, serverCertPath, serverKeyPath, 
 	return connState
 }
 
+func TestBackend_RegisteredNonCA_CRL(t *testing.T) {
+	config := logical.TestBackendConfig()
+	storage := &logical.InmemStorage{}
+	config.StorageView = storage
+
+	b, err := Factory(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nonCACert, err := ioutil.ReadFile(testCertPath1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Register the Non-CA certificate of the client key pair
+	certData := map[string]interface{}{
+		"certificate":  nonCACert,
+		"policies":     "abc",
+		"display_name": "cert1",
+		"ttl":          10000,
+	}
+	certReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "certs/cert1",
+		Storage:   storage,
+		Data:      certData,
+	}
+
+	resp, err := b.HandleRequest(certReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
+	}
+
+	// Connection state is presenting the client Non-CA cert and its key.
+	// This is exactly what is registered at the backend.
+	connState := connectionState(t, serverCAPath, serverCertPath, serverKeyPath, testCertPath1, testKeyPath1)
+	loginReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Storage:   storage,
+		Path:      "login",
+		Connection: &logical.Connection{
+			ConnState: &connState,
+		},
+	}
+	// Login should succeed.
+	resp, err = b.HandleRequest(loginReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
+	}
+
+	// Register a CRL containing the issued client certificate used above.
+	issuedCRL, err := ioutil.ReadFile(testIssuedCertCRL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crlData := map[string]interface{}{
+		"crl": issuedCRL,
+	}
+	crlReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Storage:   storage,
+		Path:      "crls/issuedcrl",
+		Data:      crlData,
+	}
+	resp, err = b.HandleRequest(crlReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
+	}
+
+	// Attempt login with the same connection state but with the CRL registered
+	resp, err = b.HandleRequest(loginReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil || !resp.IsError() {
+		t.Fatalf("expected failure due to revoked certificate")
+	}
+}
+
 func TestBackend_CRLs(t *testing.T) {
 	config := logical.TestBackendConfig()
 	storage := &logical.InmemStorage{}
@@ -127,9 +210,9 @@ func TestBackend_CRLs(t *testing.T) {
 		Data:      certData,
 	}
 
-	_, err = b.HandleRequest(certReq)
-	if err != nil {
-		t.Fatal(err)
+	resp, err := b.HandleRequest(certReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Connection state is presenting the client CA cert and its key.
@@ -143,12 +226,9 @@ func TestBackend_CRLs(t *testing.T) {
 			ConnState: &connState,
 		},
 	}
-	resp, err := b.HandleRequest(loginReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp == nil || resp.IsError() {
-		t.Fatalf("failed to login")
+	resp, err = b.HandleRequest(loginReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Now, without changing the registered client CA cert, present from
@@ -158,11 +238,8 @@ func TestBackend_CRLs(t *testing.T) {
 
 	// Attempt login with the updated connection
 	resp, err = b.HandleRequest(loginReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp == nil || resp.IsError() {
-		t.Fatalf("failed to login")
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Register a CRL containing the issued client certificate used above.
@@ -180,9 +257,9 @@ func TestBackend_CRLs(t *testing.T) {
 		Path:      "crls/issuedcrl",
 		Data:      crlData,
 	}
-	_, err = b.HandleRequest(crlReq)
-	if err != nil {
-		t.Fatal(err)
+	resp, err = b.HandleRequest(crlReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Attempt login with the revoked certificate.
@@ -200,9 +277,9 @@ func TestBackend_CRLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	certData["certificate"] = clientCA2
-	_, err = b.HandleRequest(certReq)
-	if err != nil {
-		t.Fatal(err)
+	resp, err = b.HandleRequest(certReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Test login using a different client CA cert pair.
@@ -211,11 +288,8 @@ func TestBackend_CRLs(t *testing.T) {
 
 	// Attempt login with the updated connection
 	resp, err = b.HandleRequest(loginReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp == nil || resp.IsError() {
-		t.Fatalf("failed to login")
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Register a CRL containing the root CA certificate used above.
@@ -224,9 +298,9 @@ func TestBackend_CRLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	crlData["crl"] = rootCRL
-	_, err = b.HandleRequest(crlReq)
-	if err != nil {
-		t.Fatal(err)
+	resp, err = b.HandleRequest(crlReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%#v", err, resp)
 	}
 
 	// Attempt login with the same connection state but with the CRL registered
@@ -272,8 +346,7 @@ func TestBackend_CertWrites(t *testing.T) {
 	}
 
 	tc := logicaltest.TestCase{
-		AcceptanceTest: true,
-		Backend:        testFactory(t),
+		Backend: testFactory(t),
 		Steps: []logicaltest.TestStep{
 			testAccStepCert(t, "aaa", ca1, "foo", false),
 			testAccStepCert(t, "bbb", ca2, "foo", false),
@@ -293,8 +366,7 @@ func TestBackend_basic_CA(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	logicaltest.Test(t, logicaltest.TestCase{
-		AcceptanceTest: true,
-		Backend:        testFactory(t),
+		Backend: testFactory(t),
 		Steps: []logicaltest.TestStep{
 			testAccStepCert(t, "web", ca, "foo", false),
 			testAccStepLogin(t, connState),
@@ -320,8 +392,7 @@ func TestBackend_Basic_CRLs(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	logicaltest.Test(t, logicaltest.TestCase{
-		AcceptanceTest: true,
-		Backend:        testFactory(t),
+		Backend: testFactory(t),
 		Steps: []logicaltest.TestStep{
 			testAccStepCertNoLease(t, "web", ca, "foo"),
 			testAccStepLoginDefaultLease(t, connState),
@@ -343,8 +414,7 @@ func TestBackend_basic_singleCert(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	logicaltest.Test(t, logicaltest.TestCase{
-		AcceptanceTest: true,
-		Backend:        testFactory(t),
+		Backend: testFactory(t),
 		Steps: []logicaltest.TestStep{
 			testAccStepCert(t, "web", ca, "foo", false),
 			testAccStepLogin(t, connState),
@@ -357,8 +427,7 @@ func TestBackend_untrusted(t *testing.T) {
 	connState := testConnState(t, "test-fixtures/keys/cert.pem",
 		"test-fixtures/keys/key.pem", "test-fixtures/root/rootcacert.pem")
 	logicaltest.Test(t, logicaltest.TestCase{
-		AcceptanceTest: true,
-		Backend:        testFactory(t),
+		Backend: testFactory(t),
 		Steps: []logicaltest.TestStep{
 			testAccStepLoginInvalid(t, connState),
 		},
@@ -569,7 +638,10 @@ func testConnState(t *testing.T, certPath, keyPath, rootCertPath string) tls.Con
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	rootCAs, err := api.LoadCACert(rootCertPath)
+	rootConfig := &rootcerts.Config{
+		CAFile: rootCertPath,
+	}
+	rootCAs, err := rootcerts.LoadCACerts(rootConfig)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -688,13 +760,7 @@ func Test_Renew(t *testing.T) {
 	}
 
 	resp, err = b.pathLoginRenew(req, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp == nil {
-		t.Fatal("got nil response from renew")
-	}
-	if !resp.IsError() {
+	if err == nil {
 		t.Fatal("expected error")
 	}
 

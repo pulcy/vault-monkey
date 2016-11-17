@@ -25,20 +25,20 @@ func (d dynamicSystemView) SudoPrivilege(path string, token string) bool {
 	// Resolve the token policy
 	te, err := d.core.tokenStore.Lookup(token)
 	if err != nil {
-		d.core.logger.Printf("[ERR] core: failed to lookup token: %v", err)
+		d.core.logger.Error("core: failed to lookup token", "error", err)
 		return false
 	}
 
 	// Ensure the token is valid
 	if te == nil {
-		d.core.logger.Printf("[ERR] entry not found for token: %s", token)
+		d.core.logger.Error("entry not found for given token")
 		return false
 	}
 
 	// Construct the corresponding ACL object
 	acl, err := d.core.policyStore.ACL(te.Policies...)
 	if err != nil {
-		d.core.logger.Printf("[ERR] failed to retrieve ACL for policies [%#v]: %s", te.Policies, err)
+		d.core.logger.Error("failed to retrieve ACL for token's policies", "token_policies", te.Policies, "error", err)
 		return false
 	}
 
@@ -68,4 +68,9 @@ func (d dynamicSystemView) fetchTTLs() (def, max time.Duration) {
 // Tainted indicates that the mount is in the process of being removed
 func (d dynamicSystemView) Tainted() bool {
 	return d.mountEntry.Tainted
+}
+
+// CachingDisabled indicates whether to use caching behavior
+func (d dynamicSystemView) CachingDisabled() bool {
+	return d.core.cachingDisabled
 }

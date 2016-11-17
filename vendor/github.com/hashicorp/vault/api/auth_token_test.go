@@ -28,9 +28,58 @@ func TestAuthTokenCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if secret.Auth.LeaseDuration != 3600 {
 		t.Errorf("expected 1h, got %q", secret.Auth.LeaseDuration)
+	}
+
+	renewCreateRequest := &TokenCreateRequest{
+		TTL:       "1h",
+		Renewable: new(bool),
+	}
+
+	secret, err = client.Auth().Token().Create(renewCreateRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret.Auth.LeaseDuration != 3600 {
+		t.Errorf("expected 1h, got %q", secret.Auth.LeaseDuration)
+	}
+	if secret.Auth.Renewable {
+		t.Errorf("expected non-renewable token")
+	}
+
+	*renewCreateRequest.Renewable = true
+	secret, err = client.Auth().Token().Create(renewCreateRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret.Auth.LeaseDuration != 3600 {
+		t.Errorf("expected 1h, got %q", secret.Auth.LeaseDuration)
+	}
+	if !secret.Auth.Renewable {
+		t.Errorf("expected renewable token")
+	}
+
+	explicitMaxCreateRequest := &TokenCreateRequest{
+		TTL:            "1h",
+		ExplicitMaxTTL: "1800s",
+	}
+
+	secret, err = client.Auth().Token().Create(explicitMaxCreateRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret.Auth.LeaseDuration != 1800 {
+		t.Errorf("expected 1800 seconds, got %q", secret.Auth.LeaseDuration)
+	}
+
+	explicitMaxCreateRequest.ExplicitMaxTTL = "2h"
+	secret, err = client.Auth().Token().Create(explicitMaxCreateRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret.Auth.LeaseDuration != 3600 {
+		t.Errorf("expected 3600 seconds, got %q", secret.Auth.LeaseDuration)
 	}
 }
 
