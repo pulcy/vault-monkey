@@ -36,12 +36,16 @@ var (
 
 	extractFlags struct {
 		targetFilePath string
+		k8sSecretName  string
+		k8sSecretKey   string
 		service.ServerLoginData
 	}
 )
 
 func init() {
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.targetFilePath, "target", "", "Path of target file")
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sSecretName, "kubernetes-secret-name", "", "Name of Kubernetes secret to store extracted data into")
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sSecretKey, "kubernetes-secret-key", "", "Key inside Kubernetes secret to store extracted data into")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.JobID, "job-id", "", "Identifier for the current job")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.ClusterIDPath, "cluster-id-path", defaultClusterIDPath, "Path of cluster-id file")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.MachineIDPath, "machine-id-path", defaultMachineIDPath, "Path of machine-id file")

@@ -1,5 +1,6 @@
 {
 	"registry": "pulcy",
 	"image": "vault-monkey",
-	"tag-latest": true
+	"tag-latest": true,
+	"go-vendor-dir": "deps"
 }
