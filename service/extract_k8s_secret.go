@@ -15,10 +15,7 @@
 package service
 
 import (
-	"context"
 	"encoding/base64"
-	"io/ioutil"
-	"strings"
 
 	"github.com/ericchiang/k8s"
 	"github.com/ericchiang/k8s/api/v1"
@@ -26,21 +23,15 @@ import (
 )
 
 // CreateOrUpdateKubernetesSecret extracts one or more secrets and updates fields in a Kubernetes secret.
-func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(secretName string, secrets ...EnvSecret) error {
+func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(client *K8sClient, secretName string, secrets ...EnvSecret) error {
 	namespace, err := getKubernetesNamespace()
-	if err != nil {
-		return maskAny(err)
-	}
-
-	client, err := k8s.InClusterClient()
 	if err != nil {
 		return maskAny(err)
 	}
 
 	// Get existing secret or initialize new one
 	create := false
-	ctx := context.Background()
-	secret, err := getKubernetesSecret(ctx, secretName, client, namespace)
+	secret, err := client.getKubernetesSecret(secretName)
 	if err != nil {
 		create = true
 		secret.Metadata = &v1.ObjectMeta{
@@ -71,42 +62,8 @@ func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(secretName str
 	}
 
 	// Create/update secret
-	if err := setKubernetesSecret(ctx, secretName, client, namespace, secret, create); err != nil {
+	if err := client.setKubernetesSecret(secretName, secret, create); err != nil {
 		return maskAny(err)
-	}
-
-	return nil
-}
-
-// getKubernetesNamespace reads the namespace of the current pod from the well known location.
-func getKubernetesNamespace() (string, error) {
-	raw, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	if err != nil {
-		return "", maskAny(err)
-	}
-	return strings.TrimSpace(string(raw)), nil
-}
-
-func getKubernetesSecret(ctx context.Context, secretName string, c *k8s.Client, namespace string) (v1.Secret, error) {
-	ctx = k8s.NamespaceContext(ctx, namespace)
-	s, err := c.CoreV1().GetSecret(ctx, secretName)
-	if err != nil {
-		return v1.Secret{}, maskAny(err)
-	}
-	return *s, nil
-}
-
-func setKubernetesSecret(ctx context.Context, secretName string, c *k8s.Client, namespace string, secret v1.Secret, create bool) error {
-	ctx = k8s.NamespaceContext(ctx, namespace)
-	api := c.CoreV1()
-	if create {
-		if _, err := api.CreateSecret(ctx, &secret); err != nil {
-			return maskAny(err)
-		}
-	} else {
-		if _, err := api.UpdateSecret(ctx, &secret); err != nil {
-			return maskAny(err)
-		}
 	}
 
 	return nil

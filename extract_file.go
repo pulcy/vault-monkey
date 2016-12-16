@@ -54,7 +54,7 @@ func cmdExtractFileRun(cmd *cobra.Command, args []string) {
 	}
 
 	// Login
-	c, err := serverLogin()
+	c, k8sclient, err := serverLogin()
 	if err != nil {
 		Exitf("Login failed: %#v", err)
 	}
@@ -66,7 +66,7 @@ func cmdExtractFileRun(cmd *cobra.Command, args []string) {
 			SecretField:    secretField,
 			EnvironmentKey: extractFlags.k8sSecretKey,
 		}
-		if err := c.CreateOrUpdateKubernetesSecret(extractFlags.k8sSecretName, secret); err != nil {
+		if err := c.CreateOrUpdateKubernetesSecret(k8sclient, extractFlags.k8sSecretName, secret); err != nil {
 			Exitf("Secret extraction failed: %v", err)
 		}
 	} else {
