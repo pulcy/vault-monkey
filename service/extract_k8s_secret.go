@@ -15,15 +15,13 @@
 package service
 
 import (
+	"context"
 	"encoding/base64"
 	"io/ioutil"
 	"strings"
 
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
-	metav1 "k8s.io/client-go/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
-
+	"github.com/ericchiang/k8s"
+	"github.com/ericchiang/k8s/api/v1"
 	retry "github.com/pulcy/vault-monkey/deps/github.com/giantswarm/retry-go"
 )
 
@@ -34,24 +32,21 @@ func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(secretName str
 		return maskAny(err)
 	}
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return maskAny(err)
-	}
-	// creates the clientset
-	cs, err := kubernetes.NewForConfig(config)
+	client, err := k8s.InClusterClient()
 	if err != nil {
 		return maskAny(err)
 	}
 
 	// Get existing secret or initialize new one
 	create := false
-	secret, err := getKubernetesSecret(secretName, cs, namespace)
+	ctx := context.Background()
+	secret, err := getKubernetesSecret(ctx, secretName, client, namespace)
 	if err != nil {
 		create = true
-		secret.APIVersion = "v1"
-		secret.Kind = "Secret"
-		secret.ObjectMeta.Name = secretName
+		secret.Metadata = &v1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+		}
 	}
 	if secret.Data == nil {
 		secret.Data = make(map[string][]byte)
@@ -76,7 +71,7 @@ func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(secretName str
 	}
 
 	// Create/update secret
-	if err := setKubernetesSecret(secretName, cs, namespace, secret, create); err != nil {
+	if err := setKubernetesSecret(ctx, secretName, client, namespace, secret, create); err != nil {
 		return maskAny(err)
 	}
 
@@ -92,21 +87,27 @@ func getKubernetesNamespace() (string, error) {
 	return strings.TrimSpace(string(raw)), nil
 }
 
-func getKubernetesSecret(secretName string, cs *kubernetes.Clientset, namespace string) (v1.Secret, error) {
-	api := cs.Secrets(namespace)
-	s, err := api.Get(secretName, metav1.GetOptions{})
+func getKubernetesSecret(ctx context.Context, secretName string, c *k8s.Client, namespace string) (v1.Secret, error) {
+	ctx = k8s.NamespaceContext(ctx, namespace)
+	s, err := c.CoreV1().GetSecret(ctx, secretName)
 	if err != nil {
 		return v1.Secret{}, maskAny(err)
 	}
 	return *s, nil
 }
 
-func setKubernetesSecret(secretName string, cs *kubernetes.Clientset, namespace string, secret v1.Secret, create bool) error {
-	api := cs.Secrets(namespace)
+func setKubernetesSecret(ctx context.Context, secretName string, c *k8s.Client, namespace string, secret v1.Secret, create bool) error {
+	ctx = k8s.NamespaceContext(ctx, namespace)
+	api := c.CoreV1()
 	if create {
-		_, err := api.Create(&secret)
-		return maskAny(err)
+		if _, err := api.CreateSecret(ctx, &secret); err != nil {
+			return maskAny(err)
+		}
+	} else {
+		if _, err := api.UpdateSecret(ctx, &secret); err != nil {
+			return maskAny(err)
+		}
 	}
-	_, err := api.Update(&secret)
-	return maskAny(err)
+
+	return nil
 }

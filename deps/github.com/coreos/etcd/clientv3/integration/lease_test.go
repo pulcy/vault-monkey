@@ -510,3 +510,67 @@ func TestLeaseTimeToLive(t *testing.T) {
 		t.Fatalf("unexpected keys %+v", lresp.Keys)
 	}
 }
+
+// TestLeaseRenewLostQuorum ensures keepalives work after losing quorum
+// for a while.
+func TestLeaseRenewLostQuorum(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	cli := clus.Client(0)
+	r, err := cli.Grant(context.TODO(), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kctx, kcancel := context.WithCancel(context.Background())
+	defer kcancel()
+	ka, err := cli.KeepAlive(kctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// consume first keepalive so next message sends when cluster is down
+	<-ka
+
+	// force keepalive stream message to timeout
+	clus.Members[1].Stop(t)
+	clus.Members[2].Stop(t)
+	// Use TTL-1 since the client closes the keepalive channel if no
+	// keepalive arrives before the lease deadline.
+	// The cluster has 1 second to recover and reply to the keepalive.
+	time.Sleep(time.Duration(r.TTL-1) * time.Second)
+	clus.Members[1].Restart(t)
+	clus.Members[2].Restart(t)
+
+	select {
+	case _, ok := <-ka:
+		if !ok {
+			t.Fatalf("keepalive closed")
+		}
+	case <-time.After(time.Duration(r.TTL) * time.Second):
+		t.Fatalf("timed out waiting for keepalive")
+	}
+}
+
+func TestLeaseKeepAliveLoopExit(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 1})
+	defer clus.Terminate(t)
+
+	ctx := context.Background()
+	cli := clus.Client(0)
+
+	resp, err := cli.Grant(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli.Lease.Close()
+
+	_, err = cli.KeepAlive(ctx, resp.ID)
+	if _, ok := err.(clientv3.ErrKeepAliveHalted); !ok {
+		t.Fatalf("expected %T, got %v(%T)", clientv3.ErrKeepAliveHalted{}, err, err)
+	}
+}

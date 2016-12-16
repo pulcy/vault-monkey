@@ -213,6 +213,13 @@ type Telemetry struct {
 	// narrow down the search results when neither a Submission URL or Check ID is provided.
 	// Default: service:app (e.g. service:consul)
 	CirconusCheckSearchTag string `mapstructure:"circonus_check_search_tag"`
+	// CirconusCheckTags is a comma separated list of tags to apply to the check. Note that
+	// the value of CirconusCheckSearchTag will always be added to the check.
+	// Default: none
+	CirconusCheckTags string `mapstructure:"circonus_check_tags"`
+	// CirconusCheckDisplayName is the name for the check which will be displayed in the Circonus UI.
+	// Default: value of CirconusCheckInstanceID
+	CirconusCheckDisplayName string `mapstructure:"circonus_check_display_name"`
 	// CirconusBrokerID is an explicit broker to use when creating a new check. The numeric portion
 	// of broker._cid. If metric management is enabled and neither a Submission URL nor Check ID
 	// is provided, an attempt will be made to search for an existing check using Instance ID and
@@ -481,6 +488,16 @@ type Config struct {
 	// token is not provided. If not configured the 'anonymous' token is used.
 	ACLToken string `mapstructure:"acl_token" json:"-"`
 
+	// ACLAgentMasterToken is a special token that has full read and write
+	// privileges for this agent, and can be used to call agent endpoints
+	// when no servers are available.
+	ACLAgentMasterToken string `mapstructure:"acl_agent_master_token" json:"-"`
+
+	// ACLAgentToken is the default token used to make requests for the agent
+	// itself, such as for registering itself with the catalog. If not
+	// configured, the 'acl_token' will be used.
+	ACLAgentToken string `mapstructure:"acl_agent_token" json:"-"`
+
 	// ACLMasterToken is used to bootstrap the ACL system. It should be specified
 	// on the servers in the ACLDatacenter. When the leader comes online, it ensures
 	// that the Master token is available. This provides the initial token.
@@ -502,9 +519,15 @@ type Config struct {
 	// white-lists.
 	ACLDefaultPolicy string `mapstructure:"acl_default_policy"`
 
+	// ACLDisabledTTL is used by clients to determine how long they will
+	// wait to check again with the servers if they discover ACLs are not
+	// enabled.
+	ACLDisabledTTL time.Duration `mapstructure:"-"`
+
 	// ACLDownPolicy is used to control the ACL interaction when we cannot
 	// reach the ACLDatacenter and the token is not in the cache.
 	// There are two modes:
+	//   * allow - Allow all requests
 	//   * deny - Deny all requests
 	//   * extend-cache - Ignore the cache expiration, and allow cached
 	//                    ACL's to be used to service requests. This
@@ -517,6 +540,10 @@ type Config struct {
 	// also enables replication. Replication is only available in datacenters
 	// other than the ACLDatacenter.
 	ACLReplicationToken string `mapstructure:"acl_replication_token" json:"-"`
+
+	// ACLEnforceVersion8 is used to gate a set of ACL policy features that
+	// are opt-in prior to Consul 0.8 and opt-out in Consul 0.8 and later.
+	ACLEnforceVersion8 *bool `mapstructure:"acl_enforce_version_8"`
 
 	// Watches are used to monitor various endpoints and to invoke a
 	// handler to act appropriately. These are managed entirely in the
@@ -698,11 +725,13 @@ func DefaultConfig() *Config {
 		SyncCoordinateRateTarget:  64.0, // updates / second
 		SyncCoordinateIntervalMin: 15 * time.Second,
 
-		ACLTTL:           30 * time.Second,
-		ACLDownPolicy:    "extend-cache",
-		ACLDefaultPolicy: "allow",
-		RetryInterval:    30 * time.Second,
-		RetryIntervalWan: 30 * time.Second,
+		ACLTTL:             30 * time.Second,
+		ACLDownPolicy:      "extend-cache",
+		ACLDefaultPolicy:   "allow",
+		ACLDisabledTTL:     120 * time.Second,
+		ACLEnforceVersion8: Bool(false),
+		RetryInterval:      30 * time.Second,
+		RetryIntervalWan:   30 * time.Second,
 	}
 }
 
@@ -742,6 +771,18 @@ func (c *Config) ClientListener(override string, port int) (net.Addr, error) {
 		return nil, fmt.Errorf("Failed to parse IP: %v", addr)
 	}
 	return &net.TCPAddr{IP: ip, Port: port}, nil
+}
+
+// GetTokenForAgent returns the token the agent should use for its own internal
+// operations, such as registering itself with the catalog.
+func (c *Config) GetTokenForAgent() string {
+	if c.ACLAgentToken != "" {
+		return c.ACLAgentToken
+	} else if c.ACLToken != "" {
+		return c.ACLToken
+	} else {
+		return ""
+	}
 }
 
 // DecodeConfig reads the configuration from the given reader in JSON
@@ -960,6 +1001,12 @@ func DecodeConfig(r io.Reader) (*Config, error) {
 	}
 
 	if result.AdvertiseAddrs.SerfLanRaw != "" {
+		ipStr, err := parseSingleIPTemplate(result.AdvertiseAddrs.SerfLanRaw)
+		if err != nil {
+			return nil, fmt.Errorf("Serf Advertise LAN address resolution failed: %v", err)
+		}
+		result.AdvertiseAddrs.SerfLanRaw = ipStr
+
 		addr, err := net.ResolveTCPAddr("tcp", result.AdvertiseAddrs.SerfLanRaw)
 		if err != nil {
 			return nil, fmt.Errorf("AdvertiseAddrs.SerfLan is invalid: %v", err)
@@ -968,6 +1015,12 @@ func DecodeConfig(r io.Reader) (*Config, error) {
 	}
 
 	if result.AdvertiseAddrs.SerfWanRaw != "" {
+		ipStr, err := parseSingleIPTemplate(result.AdvertiseAddrs.SerfWanRaw)
+		if err != nil {
+			return nil, fmt.Errorf("Serf Advertise WAN address resolution failed: %v", err)
+		}
+		result.AdvertiseAddrs.SerfWanRaw = ipStr
+
 		addr, err := net.ResolveTCPAddr("tcp", result.AdvertiseAddrs.SerfWanRaw)
 		if err != nil {
 			return nil, fmt.Errorf("AdvertiseAddrs.SerfWan is invalid: %v", err)
@@ -976,6 +1029,12 @@ func DecodeConfig(r io.Reader) (*Config, error) {
 	}
 
 	if result.AdvertiseAddrs.RPCRaw != "" {
+		ipStr, err := parseSingleIPTemplate(result.AdvertiseAddrs.RPCRaw)
+		if err != nil {
+			return nil, fmt.Errorf("RPC Advertise address resolution failed: %v", err)
+		}
+		result.AdvertiseAddrs.RPCRaw = ipStr
+
 		addr, err := net.ResolveTCPAddr("tcp", result.AdvertiseAddrs.RPCRaw)
 		if err != nil {
 			return nil, fmt.Errorf("AdvertiseAddrs.RPC is invalid: %v", err)
@@ -1270,6 +1329,12 @@ func MergeConfig(a, b *Config) *Config {
 	if b.Telemetry.CirconusCheckSearchTag != "" {
 		result.Telemetry.CirconusCheckSearchTag = b.Telemetry.CirconusCheckSearchTag
 	}
+	if b.Telemetry.CirconusCheckDisplayName != "" {
+		result.Telemetry.CirconusCheckDisplayName = b.Telemetry.CirconusCheckDisplayName
+	}
+	if b.Telemetry.CirconusCheckTags != "" {
+		result.Telemetry.CirconusCheckTags = b.Telemetry.CirconusCheckTags
+	}
 	if b.Telemetry.CirconusBrokerID != "" {
 		result.Telemetry.CirconusBrokerID = b.Telemetry.CirconusBrokerID
 	}
@@ -1430,6 +1495,12 @@ func MergeConfig(a, b *Config) *Config {
 	if b.ACLToken != "" {
 		result.ACLToken = b.ACLToken
 	}
+	if b.ACLAgentMasterToken != "" {
+		result.ACLAgentMasterToken = b.ACLAgentMasterToken
+	}
+	if b.ACLAgentToken != "" {
+		result.ACLAgentToken = b.ACLAgentToken
+	}
 	if b.ACLMasterToken != "" {
 		result.ACLMasterToken = b.ACLMasterToken
 	}
@@ -1448,6 +1519,9 @@ func MergeConfig(a, b *Config) *Config {
 	}
 	if b.ACLReplicationToken != "" {
 		result.ACLReplicationToken = b.ACLReplicationToken
+	}
+	if b.ACLEnforceVersion8 != nil {
+		result.ACLEnforceVersion8 = b.ACLEnforceVersion8
 	}
 	if len(b.Watches) != 0 {
 		result.Watches = append(result.Watches, b.Watches...)

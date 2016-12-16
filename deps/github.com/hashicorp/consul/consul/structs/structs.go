@@ -56,6 +56,15 @@ const (
 	HealthPassing  = "passing"
 	HealthWarning  = "warning"
 	HealthCritical = "critical"
+	HealthMaint    = "maintenance"
+)
+
+const (
+	// NodeMaint is the special key set by a node in maintenance mode.
+	NodeMaint = "_node_maintenance"
+
+	// ServiceMaintPrefix is the prefix for a service in maintenance mode.
+	ServiceMaintPrefix = "_service_maintenance:"
 )
 
 func ValidStatus(s string) bool {
@@ -172,6 +181,25 @@ type RegisterRequest struct {
 
 func (r *RegisterRequest) RequestDatacenter() string {
 	return r.Datacenter
+}
+
+// ChangesNode returns true if the given register request changes the given
+// node, which can be nil. This only looks for changes to the node record itself,
+// not any of the health checks.
+func (r *RegisterRequest) ChangesNode(node *Node) bool {
+	// This means it's creating the node.
+	if node == nil {
+		return true
+	}
+
+	// Check if any of the node-level fields are being changed.
+	if r.Node != node.Node ||
+		r.Address != node.Address ||
+		!reflect.DeepEqual(r.TaggedAddresses, node.TaggedAddresses) {
+		return true
+	}
+
+	return false
 }
 
 // DeregisterRequest is used for the Catalog.Deregister endpoint
@@ -412,6 +440,7 @@ func (c *HealthCheck) Clone() *HealthCheck {
 	return clone
 }
 
+// HealthChecks is a collection of HealthCheck structs.
 type HealthChecks []*HealthCheck
 
 // CheckServiceNode is used to provide the node, its service
@@ -460,7 +489,7 @@ type NodeInfo struct {
 	Address         string
 	TaggedAddresses map[string]string
 	Services        []*NodeService
-	Checks          []*HealthCheck
+	Checks          HealthChecks
 }
 
 // NodeDump is used to dump all the nodes with all their
@@ -906,10 +935,10 @@ func (r *KeyringRequest) RequestDatacenter() string {
 type KeyringResponse struct {
 	WAN        bool
 	Datacenter string
-	Messages   map[string]string
+	Messages   map[string]string `json:",omitempty"`
 	Keys       map[string]int
 	NumNodes   int
-	Error      string
+	Error      string `json:",omitempty"`
 }
 
 // KeyringResponses holds multiple responses to keyring queries. Each

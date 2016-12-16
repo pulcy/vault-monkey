@@ -41,7 +41,7 @@ local:
 	@ln -sf bin/$(PROJECT)-$(shell go env GOHOSTOS)-$(shell go env GOHOSTARCH) $(PROJECT)
 
 clean:
-	rm -Rf $(BIN) $(GOBUILDDIR)
+	rm -Rf bin $(GOBUILDDIR)
 
 deps:
 	@${MAKE} -B -s $(GOBUILDDIR)
@@ -56,6 +56,7 @@ update-vendor:
 	@pulsar go vendor -V $(VENDORDIR) \
 		github.com/coreos/etcd/client \
 		github.com/dchest/uniuri \
+		github.com/ericchiang/k8s \
 		github.com/giantswarm/retry-go \
 		github.com/hashicorp/consul/api \
 		github.com/hashicorp/go-rootcerts \

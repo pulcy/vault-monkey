@@ -1,8 +1,41 @@
 ## 0.7.2 (UNRELEASED)
 
+FEATURES:
+
+* **Keyring API:** A new `/v1/operator/keyring` HTTP endpoint was added that allows for performing operations such as list, install, use, and remove on the encryption keys in the gossip keyring. See the [Keyring Endpoint](https://www.consul.io/docs/agent/http/operator.html#keyring) for more details. [GH-2509]
+* **Monitor API:** A new `/v1/agent/monitor` HTTP endpoint was added to allow for viewing streaming log output from the agent, similar to the `consul monitor` command. See the [Monitor Endpoint](https://www.consul.io/docs/agent/http/agent.html#agent_monitor) for more details. [GH-2511]
+* **Reload API:** A new `/v1/agent/reload` HTTP endpoint was added for triggering a reload of the agent's configuration. See the [Reload Endpoint](https://www.consul.io/docs/agent/http/agent.html#agent_reload) for more details. [GH-2516]
+* **Leave API:** A new `/v1/agent/leave` HTTP endpoint was added for causing an agent to gracefully shutdown and leave the cluster (previously, only `force-leave` was present in the HTTP API). See the [Leave Endpoint](https://www.consul.io/docs/agent/http/agent.html#agent_leave) for more details. [GH-2516]
+* **Bind Address Templates (beta):** Consul agents now allow [go-sockaddr/template](https://godoc.org/github.com/hashicorp/go-sockaddr/template) syntax to be used for any bind address configuration (`advertise_addr`, `bind_addr`, `client_addr`, and others). This allows for easy creation of immutable images for Consul that can fetch their own address based on an interface name, network CIDR, address family from an actual RFC number, and many other possible schemes. This feature is in beta and we may tweak the template syntax before final release, but we encourage the community to try this and provide feedback. [GH-2563]
+* **Complete ACL Coverage (beta):** Consul 0.8 will feature complete ACL coverage for all of Consul. To ease the transition to the new policies, a beta version of complete ACL support was added to help with testing and migration to the new features. Please see the [ACLs Internals Guide](https://www.consul.io/docs/internals/acl.html#version_8_acls) for more details. [GH-2594, GH-2592, GH-2590]
+
+IMPROVEMENTS:
+
+* agent: Defaults to `?pretty` JSON for HTTP API requests when in `-dev` mode. [GH-2518]
+* agent: Updated Circonus metrics library and added new Circonus configration options for Consul for customizing check display name and tags. [GH-2555]
+* agent: Added a checksum to UDP gossip messages to guard against packet corruption. [GH-2574]
+* agent: Check whether a snapshot needs to be taken more often (every 5 seconds instead of 2 minutes) to keep the raft file smaller and to avoid doing huge truncations when writing lots of entries very quickly. [GH-2591]
+* agent: Allow gossiping to suspected/recently dead nodes. [GH-2593]
+* agent: Changed the gossip suspicion timeout to grow smoothly as the number of nodes grows. [GH-2593]
+* agent: Added a deprecation notice for Atlas features to the CLI and docs. [GH-2597]
+* agent: Give a better error message when the given data-dir is not a directory. [GH-2529]
+
+BUG FIXES:
+
+* agent: Fixed a panic when SIGPIPE signal was received. [GH-2404]
+* api: Added missing Raft index fields to `CatalogService` structure. [GH-2366]
+* api: Added missing notes field to `AgentServiceCheck` structure. [GH-2336]
+* api: Changed type of `AgentServiceCheck.TLSSkipVerify` from `string` to `bool`. [GH-2530]
+* api: Added new `HealthChecks.AggregatedStatus()` method that makes it easy get an overall health status from a list of checks. [GH-2544]
+* api: Changed type of `KVTxnOp.Verb` from `string` to `KVOp`. [GH-2531]
+* cli: Fixed an issue with the `consul kv put` command where a negative value would be interpreted as an argument to read from standard input. [GH-2526]
+* ui: Fixed an issue where extra commas would be shown around service tags. [GH-2340]
+* ui: Customized Bootstrap config to avoid missing font file references. [GH-2485]
+* ui: Removed "Deregister" button as removing nodes from the catalog isn't a common operation and leads to lots of user confusion. [GH-2541]
+
 ## 0.7.1 (November 10, 2016)
 
-BACKWARDS INCOMPATIBILITIES:
+BREAKING CHANGES:
 
 * Child process reaping support has been removed, along with the `reap` configuration option. Reaping is also done via [dumb-init](https://github.com/Yelp/dumb-init) in the [Consul Docker image](https://github.com/hashicorp/docker-consul), so removing it from Consul itself simplifies the code and eases future maintainence for Consul. If you are running Consul as PID 1 in a container you will need to arrange for a wrapper process to reap child processes. [GH-1988]
 * The default for `max_stale` has been increased to a near-indefinite threshold (10 years) to allow DNS queries to continue to be served in the event of a long outage with no leader. A new telemetry counter has also been added at `consul.dns.stale_queries` to track when agents serve DNS queries that are over a certain staleness (>5 seconds). [GH-2481]

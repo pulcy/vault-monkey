@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +21,9 @@ import (
 	"github.com/hashicorp/consul/consul/state"
 	"github.com/hashicorp/consul/consul/structs"
 	"github.com/hashicorp/consul/lib"
+	"github.com/hashicorp/consul/logger"
 	"github.com/hashicorp/consul/types"
+	"github.com/hashicorp/go-sockaddr/template"
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/serf/coordinate"
 	"github.com/hashicorp/serf/serf"
@@ -32,10 +36,6 @@ const (
 	// Path to save local agent checks
 	checksDir     = "checks"
 	checkStateDir = "checks/state"
-
-	// The ID of the faux health checks for maintenance mode
-	serviceMaintCheckPrefix = "_service_maintenance"
-	nodeMaintCheckID        = "_node_maintenance"
 
 	// Default reasons for node/service maintenance mode
 	defaultNodeMaintReason = "Maintenance mode is enabled for this node, " +
@@ -66,10 +66,16 @@ type Agent struct {
 	// Output sink for logs
 	logOutput io.Writer
 
+	// Used for streaming logs to
+	logWriter *logger.LogWriter
+
 	// We have one of a client or a server, depending
 	// on our configuration
 	server *consul.Server
 	client *consul.Client
+
+	// acls is an object that helps manage local ACL enforcement.
+	acls *aclManager
 
 	// state stores a local representation of the node,
 	// services and checks. Used for anti-entropy.
@@ -109,6 +115,8 @@ type Agent struct {
 	eventLock   sync.RWMutex
 	eventNotify state.NotifyGroup
 
+	reloadCh chan chan error
+
 	shutdown     bool
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
@@ -121,7 +129,8 @@ type Agent struct {
 
 // Create is used to create a new Agent. Returns
 // the agent or potentially an error.
-func Create(config *Config, logOutput io.Writer) (*Agent, error) {
+func Create(config *Config, logOutput io.Writer, logWriter *logger.LogWriter,
+	reloadCh chan chan error) (*Agent, error) {
 	// Ensure we have a log sink
 	if logOutput == nil {
 		logOutput = os.Stderr
@@ -137,6 +146,12 @@ func Create(config *Config, logOutput io.Writer) (*Agent, error) {
 
 	// Try to get an advertise address
 	if config.AdvertiseAddr != "" {
+		ipStr, err := parseSingleIPTemplate(config.AdvertiseAddr)
+		if err != nil {
+			return nil, fmt.Errorf("Advertise address resolution failed: %v", err)
+		}
+		config.AdvertiseAddr = ipStr
+
 		if ip := net.ParseIP(config.AdvertiseAddr); ip == nil {
 			return nil, fmt.Errorf("Failed to parse advertise address: %v", config.AdvertiseAddr)
 		}
@@ -158,6 +173,12 @@ func Create(config *Config, logOutput io.Writer) (*Agent, error) {
 
 	// Try to get an advertise address for the wan
 	if config.AdvertiseAddrWan != "" {
+		ipStr, err := parseSingleIPTemplate(config.AdvertiseAddrWan)
+		if err != nil {
+			return nil, fmt.Errorf("Advertise WAN address resolution failed: %v", err)
+		}
+		config.AdvertiseAddrWan = ipStr
+
 		if ip := net.ParseIP(config.AdvertiseAddrWan); ip == nil {
 			return nil, fmt.Errorf("Failed to parse advertise address for wan: %v", config.AdvertiseAddrWan)
 		}
@@ -175,6 +196,7 @@ func Create(config *Config, logOutput io.Writer) (*Agent, error) {
 		config:         config,
 		logger:         log.New(logOutput, "", log.LstdFlags),
 		logOutput:      logOutput,
+		logWriter:      logWriter,
 		checkReapAfter: make(map[types.CheckID]time.Duration),
 		checkMonitors:  make(map[types.CheckID]*CheckMonitor),
 		checkTTLs:      make(map[types.CheckID]*CheckTTL),
@@ -183,15 +205,26 @@ func Create(config *Config, logOutput io.Writer) (*Agent, error) {
 		checkDockers:   make(map[types.CheckID]*CheckDocker),
 		eventCh:        make(chan serf.UserEvent, 1024),
 		eventBuf:       make([]*UserEvent, 256),
+		reloadCh:       reloadCh,
 		shutdownCh:     make(chan struct{}),
 		endpoints:      make(map[string]string),
 	}
+
+	if err := agent.resolveTmplAddrs(); err != nil {
+		return nil, err
+	}
+
+	// Initialize the ACL manager.
+	acls, err := newACLManager(config)
+	if err != nil {
+		return nil, err
+	}
+	agent.acls = acls
 
 	// Initialize the local state.
 	agent.state.Init(config, agent.logger)
 
 	// Setup either the client or the server.
-	var err error
 	if config.Server {
 		err = agent.setupServer()
 		agent.state.SetIface(agent.server)
@@ -203,7 +236,8 @@ func Create(config *Config, logOutput io.Writer) (*Agent, error) {
 			Port:    agent.config.Ports.Server,
 			Tags:    []string{},
 		}
-		agent.state.AddService(&consulService, "")
+
+		agent.state.AddService(&consulService, agent.config.GetTokenForAgent())
 	} else {
 		err = agent.setupClient()
 		agent.state.SetIface(agent.client)
@@ -339,6 +373,9 @@ func (a *Agent) consulConfig() *consul.Config {
 	if a.config.ACLToken != "" {
 		base.ACLToken = a.config.ACLToken
 	}
+	if a.config.ACLAgentToken != "" {
+		base.ACLAgentToken = a.config.ACLAgentToken
+	}
 	if a.config.ACLMasterToken != "" {
 		base.ACLMasterToken = a.config.ACLMasterToken
 	}
@@ -356,6 +393,9 @@ func (a *Agent) consulConfig() *consul.Config {
 	}
 	if a.config.ACLReplicationToken != "" {
 		base.ACLReplicationToken = a.config.ACLReplicationToken
+	}
+	if a.config.ACLEnforceVersion8 != nil {
+		base.ACLEnforceVersion8 = *a.config.ACLEnforceVersion8
 	}
 	if a.config.SessionTTLMinRaw != "" {
 		base.SessionTTLMin = a.config.SessionTTLMin
@@ -393,6 +433,121 @@ func (a *Agent) consulConfig() *consul.Config {
 	// Setup the loggers
 	base.LogOutput = a.logOutput
 	return base
+}
+
+// parseSingleIPTemplate is used as a helper function to parse out a single IP
+// address from a config parameter.
+func parseSingleIPTemplate(ipTmpl string) (string, error) {
+	out, err := template.Parse(ipTmpl)
+	if err != nil {
+		return "", fmt.Errorf("Unable to parse address template %q: %v", ipTmpl, err)
+	}
+
+	ips := strings.Split(out, " ")
+	switch len(ips) {
+	case 0:
+		return "", errors.New("No addresses found, please configure one.")
+	case 1:
+		return ips[0], nil
+	default:
+		return "", fmt.Errorf("Multiple addresses found (%q), please configure one.", out)
+	}
+}
+
+// resolveTmplAddrs iterates over the myriad of addresses in the agent's config
+// and performs go-sockaddr/template Parse on each known address in case the
+// user specified a template config for any of their values.
+func (a *Agent) resolveTmplAddrs() error {
+	if a.config.AdvertiseAddr != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.AdvertiseAddr)
+		if err != nil {
+			return fmt.Errorf("Advertise address resolution failed: %v", err)
+		}
+		a.config.AdvertiseAddr = ipStr
+	}
+
+	if a.config.Addresses.DNS != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.Addresses.DNS)
+		if err != nil {
+			return fmt.Errorf("DNS address resolution failed: %v", err)
+		}
+		a.config.Addresses.DNS = ipStr
+	}
+
+	if a.config.Addresses.HTTP != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.Addresses.HTTP)
+		if err != nil {
+			return fmt.Errorf("HTTP address resolution failed: %v", err)
+		}
+		a.config.Addresses.HTTP = ipStr
+	}
+
+	if a.config.Addresses.HTTPS != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.Addresses.HTTPS)
+		if err != nil {
+			return fmt.Errorf("HTTPS address resolution failed: %v", err)
+		}
+		a.config.Addresses.HTTPS = ipStr
+	}
+
+	if a.config.Addresses.RPC != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.Addresses.RPC)
+		if err != nil {
+			return fmt.Errorf("RPC address resolution failed: %v", err)
+		}
+		a.config.Addresses.RPC = ipStr
+	}
+
+	if a.config.AdvertiseAddrWan != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.AdvertiseAddrWan)
+		if err != nil {
+			return fmt.Errorf("Advertise WAN address resolution failed: %v", err)
+		}
+		a.config.AdvertiseAddrWan = ipStr
+	}
+
+	if a.config.BindAddr != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.BindAddr)
+		if err != nil {
+			return fmt.Errorf("Bind address resolution failed: %v", err)
+		}
+		a.config.BindAddr = ipStr
+	}
+
+	if a.config.ClientAddr != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.ClientAddr)
+		if err != nil {
+			return fmt.Errorf("Client address resolution failed: %v", err)
+		}
+		a.config.ClientAddr = ipStr
+	}
+
+	if a.config.SerfLanBindAddr != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.SerfLanBindAddr)
+		if err != nil {
+			return fmt.Errorf("Serf LAN Address resolution failed: %v", err)
+		}
+		a.config.SerfLanBindAddr = ipStr
+	}
+
+	if a.config.SerfWanBindAddr != "" {
+		ipStr, err := parseSingleIPTemplate(a.config.SerfWanBindAddr)
+		if err != nil {
+			return fmt.Errorf("Serf WAN Address resolution failed: %v", err)
+		}
+		a.config.SerfWanBindAddr = ipStr
+	}
+
+	// Parse all tagged addresses
+	for k, v := range a.config.TaggedAddresses {
+		ipStr, err := parseSingleIPTemplate(v)
+		if err != nil {
+			return fmt.Errorf("%s address resolution failed: %v", k, err)
+		}
+		a.config.TaggedAddresses[k] = ipStr
+	}
+
+	return nil
 }
 
 // setupServer is used to initialize the Consul server
@@ -672,14 +827,11 @@ func (a *Agent) sendCoordinate() {
 				continue
 			}
 
-			// TODO - Consider adding a distance check so we don't send
-			// an update if the position hasn't changed by more than a
-			// threshold.
 			req := structs.CoordinateUpdateRequest{
 				Datacenter:   a.config.Datacenter,
 				Node:         a.config.NodeName,
 				Coord:        c,
-				WriteRequest: structs.WriteRequest{Token: a.config.ACLToken},
+				WriteRequest: structs.WriteRequest{Token: a.config.GetTokenForAgent()},
 			}
 			var reply struct{}
 			if err := a.RPC("Coordinate.Update", &req, &reply); err != nil {
@@ -1527,7 +1679,7 @@ func (a *Agent) restoreCheckState(snap map[types.CheckID]*structs.HealthCheck) {
 
 // serviceMaintCheckID returns the ID of a given service's maintenance check
 func serviceMaintCheckID(serviceID string) types.CheckID {
-	return types.CheckID(fmt.Sprintf("%s:%s", serviceMaintCheckPrefix, serviceID))
+	return types.CheckID(structs.ServiceMaintPrefix + serviceID)
 }
 
 // EnableServiceMaintenance will register a false health check against the given
@@ -1588,7 +1740,7 @@ func (a *Agent) DisableServiceMaintenance(serviceID string) error {
 // EnableNodeMaintenance places a node into maintenance mode.
 func (a *Agent) EnableNodeMaintenance(reason, token string) {
 	// Ensure node maintenance is not already enabled
-	if _, ok := a.state.Checks()[nodeMaintCheckID]; ok {
+	if _, ok := a.state.Checks()[structs.NodeMaint]; ok {
 		return
 	}
 
@@ -1600,7 +1752,7 @@ func (a *Agent) EnableNodeMaintenance(reason, token string) {
 	// Create and register the node maintenance check
 	check := &structs.HealthCheck{
 		Node:    a.config.NodeName,
-		CheckID: nodeMaintCheckID,
+		CheckID: structs.NodeMaint,
 		Name:    "Node Maintenance Mode",
 		Notes:   reason,
 		Status:  structs.HealthCritical,
@@ -1611,10 +1763,10 @@ func (a *Agent) EnableNodeMaintenance(reason, token string) {
 
 // DisableNodeMaintenance removes a node from maintenance mode
 func (a *Agent) DisableNodeMaintenance() {
-	if _, ok := a.state.Checks()[nodeMaintCheckID]; !ok {
+	if _, ok := a.state.Checks()[structs.NodeMaint]; !ok {
 		return
 	}
-	a.RemoveCheck(nodeMaintCheckID, true)
+	a.RemoveCheck(structs.NodeMaint, true)
 	a.logger.Printf("[INFO] agent: Node left maintenance mode")
 }
 

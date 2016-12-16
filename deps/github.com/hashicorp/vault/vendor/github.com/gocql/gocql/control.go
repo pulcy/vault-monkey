@@ -4,7 +4,6 @@ import (
 	crand "crypto/rand"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"regexp"
@@ -159,7 +158,7 @@ func (c *controlConn) shuffleDial(endpoints []*HostInfo) (*Conn, error) {
 			return conn, nil
 		}
 
-		log.Printf("gocql: unable to dial control conn %v: %v\n", host.Peer(), err)
+		Logger.Printf("gocql: unable to dial control conn %v: %v\n", host.Peer(), err)
 	}
 
 	return nil, err
@@ -318,8 +317,8 @@ func (c *controlConn) reconnect(refreshring bool) {
 		}
 	}
 
-	// TODO: should have our own roundrobbin for hosts so that we can try each
-	// in succession and guantee that we get a different host each time.
+	// TODO: should have our own round-robin for hosts so that we can try each
+	// in succession and guarantee that we get a different host each time.
 	if newConn == nil {
 		host := c.session.ring.rrHost()
 		if host == nil {
@@ -337,7 +336,7 @@ func (c *controlConn) reconnect(refreshring bool) {
 
 	if err := c.setupConn(newConn); err != nil {
 		newConn.Close()
-		log.Printf("gocql: control unable to register events: %v\n", err)
+		Logger.Printf("gocql: control unable to register events: %v\n", err)
 		return
 	}
 
@@ -406,7 +405,7 @@ func (c *controlConn) query(statement string, values ...interface{}) (iter *Iter
 		})
 
 		if gocqlDebug && iter.err != nil {
-			log.Printf("control: error executing %q: %v\n", statement, iter.err)
+			Logger.Printf("control: error executing %q: %v\n", statement, iter.err)
 		}
 
 		q.attempts++

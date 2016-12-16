@@ -56,7 +56,7 @@ func buildLogicalRequest(core *vault.Core, w http.ResponseWriter, r *http.Reques
 	// Parse the request if we can
 	var data map[string]interface{}
 	if op == logical.UpdateOperation {
-		err := parseRequest(r, &data)
+		err := parseRequest(r, w, &data)
 		if err == io.EOF {
 			data = nil
 			err = nil
@@ -260,6 +260,7 @@ func respondRaw(w http.ResponseWriter, r *http.Request, resp *logical.Response) 
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+
 	w.WriteHeader(status)
 	w.Write(body)
 }

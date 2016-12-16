@@ -679,6 +679,9 @@ func (s *EtcdServer) run() {
 		if s.kv != nil {
 			s.kv.Close()
 		}
+		if s.authStore != nil {
+			s.authStore.Close()
+		}
 		if s.be != nil {
 			s.be.Close()
 		}
@@ -730,7 +733,9 @@ func (s *EtcdServer) run() {
 			plog.Infof("the data-dir used by this member must be removed.")
 			return
 		case <-getSyncC():
-			s.sync(s.Cfg.ReqTimeout())
+			if s.store.HasTTLKeys() {
+				s.sync(s.Cfg.ReqTimeout())
+			}
 		case <-s.stop:
 			return
 		}
@@ -1002,7 +1007,32 @@ func (s *EtcdServer) LeaderStats() []byte {
 
 func (s *EtcdServer) StoreStats() []byte { return s.store.JsonStats() }
 
+func (s *EtcdServer) checkMembershipOperationPermission(ctx context.Context) error {
+	if s.authStore == nil {
+		// In the context of ordinal etcd process, s.authStore will never be nil.
+		// This branch is for handling cases in server_test.go
+		return nil
+	}
+
+	// Note that this permission check is done in the API layer,
+	// so TOCTOU problem can be caused potentially in a schedule like this:
+	// update membership with user A -> revoke root role of A -> apply membership change
+	// in the state machine layer
+	// However, both of membership change and role management requires the root privilege.
+	// So careful operation by admins can prevent the problem.
+	authInfo, err := s.authInfoFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
+	return s.AuthStore().IsAdminPermitted(authInfo)
+}
+
 func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) error {
+	if err := s.checkMembershipOperationPermission(ctx); err != nil {
+		return err
+	}
+
 	if s.Cfg.StrictReconfigCheck {
 		// by default StrictReconfigCheck is enabled; reject new members if unhealthy
 		if !s.cluster.IsReadyToAddNewMember() {
@@ -1029,6 +1059,10 @@ func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) erro
 }
 
 func (s *EtcdServer) RemoveMember(ctx context.Context, id uint64) error {
+	if err := s.checkMembershipOperationPermission(ctx); err != nil {
+		return err
+	}
+
 	// by default StrictReconfigCheck is enabled; reject removal if leads to quorum loss
 	if err := s.mayRemoveMember(types.ID(id)); err != nil {
 		return err
@@ -1068,8 +1102,12 @@ func (s *EtcdServer) mayRemoveMember(id types.ID) error {
 }
 
 func (s *EtcdServer) UpdateMember(ctx context.Context, memb membership.Member) error {
-	b, err := json.Marshal(memb)
-	if err != nil {
+	b, merr := json.Marshal(memb)
+	if merr != nil {
+		return merr
+	}
+
+	if err := s.checkMembershipOperationPermission(ctx); err != nil {
 		return err
 	}
 	cc := raftpb.ConfChange{
@@ -1092,8 +1130,6 @@ func (s *EtcdServer) Term() uint64 { return atomic.LoadUint64(&s.r.term) }
 func (s *EtcdServer) Lead() uint64 { return atomic.LoadUint64(&s.r.lead) }
 
 func (s *EtcdServer) Leader() types.ID { return types.ID(s.Lead()) }
-
-func (s *EtcdServer) IsPprofEnabled() bool { return s.Cfg.EnablePprof }
 
 // configure sends a configuration change through consensus and
 // then waits for it to be applied to the server. It

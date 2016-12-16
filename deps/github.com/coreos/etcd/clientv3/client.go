@@ -88,6 +88,7 @@ func NewFromConfigFile(path string) (*Client, error) {
 func (c *Client) Close() error {
 	c.cancel()
 	c.Watcher.Close()
+	c.Lease.Close()
 	return toErr(c.ctx, c.conn.Close())
 }
 
@@ -97,7 +98,12 @@ func (c *Client) Close() error {
 func (c *Client) Ctx() context.Context { return c.ctx }
 
 // Endpoints lists the registered endpoints for the client.
-func (c *Client) Endpoints() []string { return c.cfg.Endpoints }
+func (c *Client) Endpoints() (eps []string) {
+	// copy the slice; protect original endpoints from being changed
+	eps = make([]string, len(c.cfg.Endpoints))
+	copy(eps, c.cfg.Endpoints)
+	return
+}
 
 // SetEndpoints updates client's endpoints.
 func (c *Client) SetEndpoints(eps ...string) {
