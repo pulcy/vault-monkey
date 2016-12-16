@@ -44,8 +44,8 @@ func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(secretName str
 	if err != nil {
 		create = true
 		secret.Metadata = &v1.ObjectMeta{
-			Name:      secretName,
-			Namespace: namespace,
+			Name:      k8s.StringP(secretName),
+			Namespace: k8s.StringP(namespace),
 		}
 	}
 	if secret.Data == nil {

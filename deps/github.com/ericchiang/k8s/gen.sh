@@ -2,14 +2,14 @@
 
 set -e
 
-VERSION=1.4.6
+VERSION=1.5.1
 
 if [ ! -d assets/k8s.io/kubernetes ]; then
     mkdir -p assets/k8s.io
     wget https://github.com/kubernetes/kubernetes/archive/v${VERSION}.zip
     unzip v${VERSION}.zip
     mv kubernetes-${VERSION} assets/k8s.io/kubernetes
-    rm v1.4.6.zip
+    rm v${VERSION}.zip
 fi
 
 rm -rf api apis runtime util types.go
@@ -21,7 +21,7 @@ cd assets
 protobuf=$( find k8s.io/kubernetes/pkg/{api,apis,util,runtime} -name '*.proto' )
 for file in $protobuf; do
     echo $file
-    protoc --gogoslick_out=$PKG $file
+    protoc --gogofast_out=$PKG $file
 done
 
 cd -
