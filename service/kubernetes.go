@@ -15,18 +15,17 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"strings"
 
-	"github.com/ericchiang/k8s"
-	"github.com/ericchiang/k8s/api/v1"
+	k8s "github.com/YakLabs/k8s-client"
+	"github.com/YakLabs/k8s-client/http"
 )
 
 type K8sClient struct {
 	baseServerLoginData
-	c                     *k8s.Client
+	c                     k8s.Client
 	namespace             string
 	podName               string
 	clusterInfoSecretName string
@@ -40,7 +39,7 @@ func NewKubernetesClient(podName, clusterInfoSecretName, clusterIDSecretKey stri
 		return nil, maskAny(err)
 	}
 
-	client, err := k8s.InClusterClient()
+	client, err := http.NewInCluster()
 	if err != nil {
 		return nil, maskAny(err)
 	}
@@ -69,7 +68,7 @@ func (c *K8sClient) ClusterID() (string, error) {
 			fmt.Printf("ClusterInfo secret with name '%s' not found", c.clusterInfoSecretName)
 			// Now fallback to next
 		} else {
-			v, found := s.GetData()[c.clusterIDSecretKey]
+			v, found := s.Data[c.clusterIDSecretKey]
 			if !found {
 				return "", maskAny(fmt.Errorf("Key '%s' is not found in secret '%s'", c.clusterIDSecretKey, c.clusterInfoSecretName))
 			}
@@ -81,20 +80,19 @@ func (c *K8sClient) ClusterID() (string, error) {
 
 func (c *K8sClient) MachineID() (string, error) {
 	if c.podName != "" {
-		ctx := k8s.NamespaceContext(context.Background(), c.namespace)
-		pod, err := c.c.CoreV1().GetPod(ctx, c.podName)
+		pod, err := c.c.GetPod(c.namespace, c.podName)
 		if err != nil {
 			return "", maskAny(err)
 		}
-		podHostIP := pod.GetStatus().GetHostIP()
-		nodes, err := c.c.CoreV1().ListNodes(ctx)
+		podHostIP := pod.Status.HostIP
+		nodes, err := c.c.ListNodes(nil)
 		if err != nil {
 			return "", maskAny(err)
 		}
 		for _, n := range nodes.Items {
-			for _, a := range n.GetStatus().GetAddresses() {
-				if a.GetAddress() == podHostIP {
-					return n.GetStatus().GetNodeInfo().GetMachineID(), nil
+			for _, a := range n.Status.Addresses {
+				if a.Address == podHostIP {
+					return n.Status.NodeInfo.MachineID, nil
 				}
 			}
 		}
@@ -111,24 +109,21 @@ func getKubernetesNamespace() (string, error) {
 	return strings.TrimSpace(string(raw)), nil
 }
 
-func (c *K8sClient) getKubernetesSecret(secretName string) (v1.Secret, error) {
-	ctx := k8s.NamespaceContext(context.Background(), c.namespace)
-	s, err := c.c.CoreV1().GetSecret(ctx, secretName)
+func (c *K8sClient) getKubernetesSecret(secretName string) (k8s.Secret, error) {
+	s, err := c.c.GetSecret(c.namespace, secretName)
 	if err != nil {
-		return v1.Secret{}, maskAny(err)
+		return k8s.Secret{}, maskAny(err)
 	}
 	return *s, nil
 }
 
-func (c *K8sClient) setKubernetesSecret(secretName string, secret v1.Secret, create bool) error {
-	ctx := k8s.NamespaceContext(context.Background(), c.namespace)
-	api := c.c.CoreV1()
+func (c *K8sClient) setKubernetesSecret(secretName string, secret k8s.Secret, create bool) error {
 	if create {
-		if _, err := api.CreateSecret(ctx, &secret); err != nil {
+		if _, err := c.c.CreateSecret(c.namespace, &secret); err != nil {
 			return maskAny(err)
 		}
 	} else {
-		if _, err := api.UpdateSecret(ctx, &secret); err != nil {
+		if _, err := c.c.UpdateSecret(c.namespace, &secret); err != nil {
 			return maskAny(err)
 		}
 	}

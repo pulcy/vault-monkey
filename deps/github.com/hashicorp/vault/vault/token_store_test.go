@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -547,7 +549,7 @@ func TestTokenStore_UseToken(t *testing.T) {
 	if te == nil {
 		t.Fatalf("token entry for use #2 was nil")
 	}
-	if te.NumUses != -1 {
+	if te.NumUses != tokenRevocationDeferred {
 		t.Fatalf("token entry after use #2 did not have revoke flag")
 	}
 	ts.Revoke(te.ID)
@@ -2985,5 +2987,406 @@ func TestTokenStore_AllowedDisallowedPolicies(t *testing.T) {
 	resp, err = ts.HandleRequest(tokenReq)
 	if err == nil {
 		t.Fatalf("expected an error")
+	}
+}
+
+// Issue 2189
+func TestTokenStore_RevokeUseCountToken(t *testing.T) {
+	var resp *logical.Response
+	var err error
+	cubbyFuncLock := &sync.RWMutex{}
+	cubbyFuncLock.Lock()
+
+	exp := mockExpiration(t)
+	ts := exp.tokenStore
+	root, _ := exp.tokenStore.rootToken()
+
+	tokenReq := &logical.Request{
+		Path:        "create",
+		ClientToken: root.ID,
+		Operation:   logical.UpdateOperation,
+		Data: map[string]interface{}{
+			"num_uses": 1,
+		},
+	}
+	resp, err = ts.HandleRequest(tokenReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%v", err, resp)
+	}
+
+	tut := resp.Auth.ClientToken
+	saltTut := ts.SaltID(tut)
+	te, err := ts.lookupSalted(saltTut, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te == nil {
+		t.Fatal("nil entry")
+	}
+	if te.NumUses != 1 {
+		t.Fatalf("bad: %d", te.NumUses)
+	}
+
+	te, err = ts.UseToken(te)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te == nil {
+		t.Fatal("nil entry")
+	}
+	if te.NumUses != tokenRevocationDeferred {
+		t.Fatalf("bad: %d", te.NumUses)
+	}
+
+	// Should return no entry because it's tainted
+	te, err = ts.lookupSalted(saltTut, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te != nil {
+		t.Fatalf("%#v", te)
+	}
+
+	// But it should show up in an API lookup call
+	req := &logical.Request{
+		Path:        "lookup-self",
+		ClientToken: tut,
+		Operation:   logical.UpdateOperation,
+	}
+	resp, err = ts.HandleRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil || resp.Data == nil || resp.Data["num_uses"] == nil {
+		t.Fatal("nil resp or data")
+	}
+	if resp.Data["num_uses"].(int) != -1 {
+		t.Fatalf("bad: %v", resp.Data["num_uses"])
+	}
+
+	// Should return tainted entries
+	te, err = ts.lookupSalted(saltTut, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te == nil {
+		t.Fatal("nil entry")
+	}
+	if te.NumUses != tokenRevocationDeferred {
+		t.Fatalf("bad: %d", te.NumUses)
+	}
+
+	origDestroyCubbyhole := ts.cubbyholeDestroyer
+
+	ts.cubbyholeDestroyer = func(*TokenStore, string) error {
+		return fmt.Errorf("keep it frosty")
+	}
+
+	err = ts.revokeSalted(saltTut)
+	if err == nil {
+		t.Fatalf("expected err")
+	}
+
+	// Since revocation failed we should see the tokenRevocationFailed canary value
+	te, err = ts.lookupSalted(saltTut, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te == nil {
+		t.Fatal("nil entry")
+	}
+	if te.NumUses != tokenRevocationFailed {
+		t.Fatalf("bad: %d", te.NumUses)
+	}
+
+	// Check the race condition situation by making the process sleep
+	ts.cubbyholeDestroyer = func(*TokenStore, string) error {
+		time.Sleep(1 * time.Second)
+		return fmt.Errorf("keep it frosty")
+	}
+	cubbyFuncLock.Unlock()
+
+	go func() {
+		cubbyFuncLock.RLock()
+		err := ts.revokeSalted(saltTut)
+		cubbyFuncLock.RUnlock()
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+	}()
+
+	// Give time for the function to start and grab locks
+	time.Sleep(200 * time.Millisecond)
+	te, err = ts.lookupSalted(saltTut, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te == nil {
+		t.Fatal("nil entry")
+	}
+	if te.NumUses != tokenRevocationInProgress {
+		t.Fatalf("bad: %d", te.NumUses)
+	}
+
+	// Let things catch up
+	time.Sleep(2 * time.Second)
+
+	// Put back to normal
+	cubbyFuncLock.Lock()
+	defer cubbyFuncLock.Unlock()
+	ts.cubbyholeDestroyer = origDestroyCubbyhole
+
+	err = ts.revokeSalted(saltTut)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	te, err = ts.lookupSalted(saltTut, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if te != nil {
+		t.Fatal("found entry")
+	}
+}
+
+// Create a token, delete the token entry while leaking accessors, invoke tidy
+// and check if the dangling accessor entry is getting removed
+func TestTokenStore_HandleTidyCase1(t *testing.T) {
+	var resp *logical.Response
+	var err error
+
+	_, ts, _, root := TestCoreWithTokenStore(t)
+
+	// List the number of accessors. Since there is only root token
+	// present, the list operation should return only one key.
+	accessorListReq := &logical.Request{
+		Operation:   logical.ListOperation,
+		Path:        "accessors",
+		ClientToken: root,
+	}
+	resp, err = ts.HandleRequest(accessorListReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%v", err, resp)
+	}
+
+	numberOfAccessors := len(resp.Data["keys"].([]string))
+	if numberOfAccessors != 1 {
+		t.Fatalf("bad: number of accessors. Expected: 1, Actual: %d", numberOfAccessors)
+	}
+
+	for i := 1; i <= 100; i++ {
+		// Create a regular token
+		tokenReq := &logical.Request{
+			Operation:   logical.UpdateOperation,
+			Path:        "create",
+			ClientToken: root,
+			Data: map[string]interface{}{
+				"policies": []string{"policy1"},
+			},
+		}
+		resp, err = ts.HandleRequest(tokenReq)
+		if err != nil || (resp != nil && resp.IsError()) {
+			t.Fatalf("err:%v resp:%v", err, resp)
+		}
+		tut := resp.Auth.ClientToken
+
+		// Creation of another token should end up with incrementing
+		// the number of accessors
+		// the storage
+		resp, err = ts.HandleRequest(accessorListReq)
+		if err != nil || (resp != nil && resp.IsError()) {
+			t.Fatalf("err:%v resp:%v", err, resp)
+		}
+
+		numberOfAccessors = len(resp.Data["keys"].([]string))
+		if numberOfAccessors != i+1 {
+			t.Fatalf("bad: number of accessors. Expected: %d, Actual: %d", i+1, numberOfAccessors)
+		}
+
+		// Revoke the token while leaking other items associated with the
+		// token. Do this by doing what revokeSalted used to do before it was
+		// fixed, i.e., by deleting the storage entry for token and its
+		// cubbyhole and by not deleting its secondary index, its accessor and
+		// associated leases.
+
+		saltedTut := ts.SaltID(tut)
+		_, err = ts.lookupSalted(saltedTut, true)
+		if err != nil {
+			t.Fatalf("failed to lookup token: %v", err)
+		}
+
+		// Destroy the token index
+		path := lookupPrefix + saltedTut
+		if ts.view.Delete(path); err != nil {
+			t.Fatalf("failed to delete token entry: %v", err)
+		}
+
+		// Destroy the cubby space
+		err = ts.destroyCubbyhole(saltedTut)
+		if err != nil {
+			t.Fatalf("failed to destroyCubbyhole: %v", err)
+		}
+
+		// Leaking of accessor should have resulted in no change to the number
+		// of accessors
+		resp, err = ts.HandleRequest(accessorListReq)
+		if err != nil || (resp != nil && resp.IsError()) {
+			t.Fatalf("err:%v resp:%v", err, resp)
+		}
+
+		numberOfAccessors = len(resp.Data["keys"].([]string))
+		if numberOfAccessors != i+1 {
+			t.Fatalf("bad: number of accessors. Expected: %d, Actual: %d", i+1, numberOfAccessors)
+		}
+	}
+
+	tidyReq := &logical.Request{
+		Path:        "tidy",
+		Operation:   logical.UpdateOperation,
+		ClientToken: root,
+	}
+	resp, err = ts.HandleRequest(tidyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp != nil && resp.IsError() {
+		t.Fatalf("resp: %#v", resp)
+	}
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%v", err, resp)
+	}
+
+	// Tidy should have removed all the dangling accessor entries
+	resp, err = ts.HandleRequest(accessorListReq)
+	if err != nil || (resp != nil && resp.IsError()) {
+		t.Fatalf("err:%v resp:%v", err, resp)
+	}
+
+	numberOfAccessors = len(resp.Data["keys"].([]string))
+	if numberOfAccessors != 1 {
+		t.Fatalf("bad: number of accessors. Expected: 1, Actual: %d", numberOfAccessors)
+	}
+}
+
+func TestTokenStore_TidyLeaseRevocation(t *testing.T) {
+	exp := mockExpiration(t)
+	ts := exp.tokenStore
+
+	noop := &NoopBackend{}
+	_, barrier, _ := mockBarrier(t)
+	view := NewBarrierView(barrier, "logical/")
+	meUUID, err := uuid.GenerateUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp.router.Mount(noop, "prod/aws/", &MountEntry{UUID: meUUID}, view)
+
+	// Create new token
+	root, err := ts.rootToken()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	req := logical.TestRequest(t, logical.UpdateOperation, "create")
+	req.ClientToken = root.ID
+	req.Data["policies"] = []string{"default"}
+
+	resp, err := ts.HandleRequest(req)
+	if err != nil {
+		t.Fatalf("err: %v %v", err, resp)
+	}
+
+	// Create a new token
+	auth := &logical.Auth{
+		ClientToken: resp.Auth.ClientToken,
+		LeaseOptions: logical.LeaseOptions{
+			TTL:       time.Hour,
+			Renewable: true,
+		},
+	}
+	err = exp.RegisterAuth("auth/token/create", auth)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	tut := resp.Auth.ClientToken
+
+	req = &logical.Request{
+		Path:        "prod/aws/foo",
+		ClientToken: tut,
+	}
+	resp = &logical.Response{
+		Secret: &logical.Secret{
+			LeaseOptions: logical.LeaseOptions{
+				TTL: time.Hour,
+			},
+		},
+	}
+
+	leases := []string{}
+
+	for i := 0; i < 10; i++ {
+		leaseId, err := exp.Register(req, resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		leases = append(leases, leaseId)
+	}
+
+	sort.Strings(leases)
+
+	storedLeases, err := exp.lookupByToken(tut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(storedLeases)
+	if !reflect.DeepEqual(leases, storedLeases) {
+		t.Fatalf("bad: %#v vs %#v", leases, storedLeases)
+	}
+
+	// Now, delete the token entry. The leases should still exist.
+	saltedTut := ts.SaltID(tut)
+	te, err := ts.lookupSalted(saltedTut, true)
+	if err != nil {
+		t.Fatalf("failed to lookup token: %v", err)
+	}
+	if te == nil {
+		t.Fatal("got nil token entry")
+	}
+
+	// Destroy the token index
+	path := lookupPrefix + saltedTut
+	if ts.view.Delete(path); err != nil {
+		t.Fatalf("failed to delete token entry: %v", err)
+	}
+	te, err = ts.lookupSalted(saltedTut, true)
+	if err != nil {
+		t.Fatalf("failed to lookup token: %v", err)
+	}
+	if te != nil {
+		t.Fatal("got token entry")
+	}
+
+	// Verify leases still exist
+	storedLeases, err = exp.lookupByToken(tut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(storedLeases)
+	if !reflect.DeepEqual(leases, storedLeases) {
+		t.Fatalf("bad: %#v vs %#v", leases, storedLeases)
+	}
+
+	// Call tidy
+	ts.handleTidy(nil, nil)
+
+	// Verify leases are gone
+	storedLeases, err = exp.lookupByToken(tut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedLeases) > 0 {
+		t.Fatal("found leases")
 	}
 }

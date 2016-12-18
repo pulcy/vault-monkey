@@ -17,8 +17,7 @@ package service
 import (
 	"encoding/base64"
 
-	"github.com/ericchiang/k8s"
-	"github.com/ericchiang/k8s/api/v1"
+	k8s "github.com/YakLabs/k8s-client"
 	retry "github.com/pulcy/vault-monkey/deps/github.com/giantswarm/retry-go"
 )
 
@@ -34,9 +33,9 @@ func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(client *K8sCli
 	secret, err := client.getKubernetesSecret(secretName)
 	if err != nil {
 		create = true
-		secret.Metadata = &v1.ObjectMeta{
-			Name:      k8s.StringP(secretName),
-			Namespace: k8s.StringP(namespace),
+		secret.ObjectMeta = k8s.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
 		}
 	}
 	if secret.Data == nil {

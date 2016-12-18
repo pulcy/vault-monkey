@@ -56,7 +56,6 @@ update-vendor:
 	@pulsar go vendor -V $(VENDORDIR) \
 		github.com/coreos/etcd/client \
 		github.com/dchest/uniuri \
-		github.com/ericchiang/k8s \
 		github.com/giantswarm/retry-go \
 		github.com/hashicorp/consul/api \
 		github.com/hashicorp/go-rootcerts \
@@ -70,7 +69,8 @@ update-vendor:
 		github.com/op/go-logging \
 		github.com/ryanuber/columnize \
 		github.com/spf13/cobra \
-		github.com/spf13/pflag
+		github.com/spf13/pflag \
+		github.com/YakLabs/k8s-client
 
 $(BIN): $(GOBUILDDIR) $(SOURCES)
 	@mkdir -p $(BINDIR)
