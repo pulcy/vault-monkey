@@ -86,7 +86,7 @@ func serverLogin() (*service.AuthenticatedVaultClient, *service.K8sClient, error
 	envData := service.NewEnvServerLoginData(staticData)
 	loginData := envData
 	if k8sclient != nil {
-		loginData = k8sclient.ServerLoginData()
+		loginData = k8sclient.ServerLoginData(loginData)
 	}
 
 	c, err := vs.ServerLogin(loginData)

@@ -52,7 +52,8 @@ func NewKubernetesClient(podName, clusterInfoSecretName, clusterIDSecretKey stri
 	}, nil
 }
 
-func (c *K8sClient) ServerLoginData() ServerLoginData {
+func (c *K8sClient) ServerLoginData(next ServerLoginData) ServerLoginData {
+	c.baseServerLoginData.next = next
 	return c
 }
 
@@ -92,7 +93,12 @@ func (c *K8sClient) MachineID() (string, error) {
 		for _, n := range nodes.Items {
 			for _, a := range n.Status.Addresses {
 				if a.Address == podHostIP {
-					return n.Status.NodeInfo.MachineID, nil
+					nodeInfo := n.Status.NodeInfo
+					id := nodeInfo.MachineID
+					if id == "" {
+						id = nodeInfo.SystemUUID
+					}
+					return id, nil
 				}
 			}
 		}
