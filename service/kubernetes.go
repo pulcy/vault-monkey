@@ -82,27 +82,47 @@ func (c *K8sClient) ClusterID() (string, error) {
 }
 
 func (c *K8sClient) MachineID() (string, error) {
-	if c.podName != "" {
+	if c.podName != "" || c.podIP != "" {
 		var hostIP string
-		if pod, err := c.c.GetPod(c.namespace, c.podName); err == nil {
-			hostIP = pod.Status.HostIP
-		} else {
+		if c.podName != "" {
+			if pod, err := c.c.GetPod(c.namespace, c.podName); err == nil {
+				hostIP = pod.Status.HostIP
+			}
+		}
+		if hostIP == "" {
 			// This is the case then hostNetwork=true
 			hostIP = c.podIP
 		}
-		nodes, err := c.c.ListNodes(nil)
-		if err != nil {
-			return "", maskAny(err)
-		}
-		for _, n := range nodes.Items {
-			for _, a := range n.Status.Addresses {
-				if a.Address == hostIP {
-					nodeInfo := n.Status.NodeInfo
-					id := nodeInfo.MachineID
-					if id == "" {
-						id = nodeInfo.SystemUUID
+		if hostIP != "" {
+			nodes, err := c.c.ListNodes(nil)
+			if err != nil {
+				return "", maskAny(err)
+			}
+			// Check by address
+			for _, n := range nodes.Items {
+				for _, a := range n.Status.Addresses {
+					fmt.Printf("Checking node '%s' with address '%s', searching for '%s'\n", n.Spec.ExternalID, a.Address, hostIP)
+					if a.Address == hostIP {
+						nodeInfo := n.Status.NodeInfo
+						id := nodeInfo.MachineID
+						if id == "" {
+							id = nodeInfo.SystemUUID
+						}
+						return id, nil
 					}
-					return id, nil
+				}
+			}
+			// Check by node name
+			if c.podName != "" {
+				for _, n := range nodes.Items {
+					if n.Spec.ExternalID == c.podName {
+						nodeInfo := n.Status.NodeInfo
+						id := nodeInfo.MachineID
+						if id == "" {
+							id = nodeInfo.SystemUUID
+						}
+						return id, nil
+					}
 				}
 			}
 		}
