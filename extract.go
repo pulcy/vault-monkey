@@ -38,6 +38,7 @@ var (
 
 	extractFlags struct {
 		targetFilePath           string
+		k8sPodIP                 string
 		k8sPodName               string
 		k8sClusterInfoSecretName string
 		k8sClusterIDSecretKey    string
@@ -53,6 +54,7 @@ func init() {
 	hostName := os.Getenv("HOSTNAME")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.targetFilePath, "target", "", "Path of target file")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sPodName, "kubernetes-pod-name", hostName, "Name of Kubernetes pod this process is running in")
+	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sPodIP, "kubernetes-pod-ip", "", "IP address of Kubernetes pod (uses with hostNetwork=true)")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sClusterInfoSecretName, "kubernetes-cluster-info-secret-name", defaultK8sClusterInfoSecretName, "Name of Kubernetes secret that holds the cluster ID")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sClusterIDSecretKey, "kubernetes-cluster-id-secret-key", defaultK8sClusterIDSecretKey, "Key for the cluster ID secret identified by `kubernetes-cluster-info-secret-name`")
 	cmdExtract.PersistentFlags().StringVar(&extractFlags.k8sSecretName, "kubernetes-secret-name", "", "Name of Kubernetes secret to store extracted data into")
@@ -74,7 +76,8 @@ func serverLogin() (*service.AuthenticatedVaultClient, *service.K8sClient, error
 	var k8sclient *service.K8sClient
 	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 	if host != "" && port != "" && (extractFlags.k8sPodName != "" || extractFlags.k8sClusterInfoSecretName != "") {
-		k8sclient, err = service.NewKubernetesClient(extractFlags.k8sPodName, extractFlags.k8sClusterInfoSecretName, extractFlags.k8sClusterIDSecretKey)
+		k8sclient, err = service.NewKubernetesClient(extractFlags.k8sPodName, extractFlags.k8sPodIP,
+			extractFlags.k8sClusterInfoSecretName, extractFlags.k8sClusterIDSecretKey)
 		if err != nil {
 			return nil, nil, maskAny(err)
 		}

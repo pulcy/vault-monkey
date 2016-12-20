@@ -28,12 +28,13 @@ type K8sClient struct {
 	c                     k8s.Client
 	namespace             string
 	podName               string
+	podIP                 string
 	clusterInfoSecretName string
 	clusterIDSecretKey    string
 }
 
 // NewKubernetesClient creates a kubernetes client.
-func NewKubernetesClient(podName, clusterInfoSecretName, clusterIDSecretKey string) (*K8sClient, error) {
+func NewKubernetesClient(podName, podIP, clusterInfoSecretName, clusterIDSecretKey string) (*K8sClient, error) {
 	namespace, err := getKubernetesNamespace()
 	if err != nil {
 		return nil, maskAny(err)
@@ -44,9 +45,10 @@ func NewKubernetesClient(podName, clusterInfoSecretName, clusterIDSecretKey stri
 		return nil, maskAny(err)
 	}
 	return &K8sClient{
-		c:                     client,
-		namespace:             namespace,
-		podName:               podName,
+		c:         client,
+		namespace: namespace,
+		podName:   podName,
+		podIP:     podIP,
 		clusterInfoSecretName: clusterInfoSecretName,
 		clusterIDSecretKey:    clusterIDSecretKey,
 	}, nil
@@ -81,18 +83,20 @@ func (c *K8sClient) ClusterID() (string, error) {
 
 func (c *K8sClient) MachineID() (string, error) {
 	if c.podName != "" {
-		pod, err := c.c.GetPod(c.namespace, c.podName)
-		if err != nil {
-			return "", maskAny(err)
+		var hostIP string
+		if pod, err := c.c.GetPod(c.namespace, c.podName); err == nil {
+			hostIP = pod.Status.HostIP
+		} else {
+			// This is the case then hostNetwork=true
+			hostIP = c.podIP
 		}
-		podHostIP := pod.Status.HostIP
 		nodes, err := c.c.ListNodes(nil)
 		if err != nil {
 			return "", maskAny(err)
 		}
 		for _, n := range nodes.Items {
 			for _, a := range n.Status.Addresses {
-				if a.Address == podHostIP {
+				if a.Address == hostIP {
 					nodeInfo := n.Status.NodeInfo
 					id := nodeInfo.MachineID
 					if id == "" {
