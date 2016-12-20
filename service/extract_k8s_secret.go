@@ -15,8 +15,6 @@
 package service
 
 import (
-	"encoding/base64"
-
 	k8s "github.com/YakLabs/k8s-client"
 	retry "github.com/pulcy/vault-monkey/deps/github.com/giantswarm/retry-go"
 )
@@ -56,8 +54,7 @@ func (c *AuthenticatedVaultClient) CreateOrUpdateKubernetesSecret(client *K8sCli
 		if err := retry.Do(op, retry.RetryChecker(IsVault), retry.MaxTries(3)); err != nil {
 			return maskAny(err)
 		}
-		encodedValue := base64.StdEncoding.EncodeToString([]byte(value))
-		secret.Data[envSec.EnvironmentKey] = []byte(encodedValue)
+		secret.Data[envSec.EnvironmentKey] = []byte(value)
 	}
 
 	// Create/update secret
