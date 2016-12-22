@@ -6,18 +6,17 @@ COMMIT := $(shell git rev-parse --short HEAD)
 
 GOBUILDDIR := $(SCRIPTDIR)/.gobuild
 SRCDIR := $(SCRIPTDIR)
-BINDIR := $(ROOTDIR)
-VENDORDIR := $(SCRIPTDIR)/vendor
+BINDIR := $(ROOTDIR)/bin
+VENDORDIR := $(SCRIPTDIR)/deps
 
 ORGPATH := github.com/pulcy
 ORGDIR := $(GOBUILDDIR)/src/$(ORGPATH)
 REPONAME := $(PROJECT)
 REPODIR := $(ORGDIR)/$(REPONAME)
 REPOPATH := $(ORGPATH)/$(REPONAME)
-BIN := $(BINDIR)/$(PROJECT)
 
 GOPATH := $(GOBUILDDIR)
-GOVERSION := 1.7.3-alpine
+GOVERSION := 1.7.4-alpine
 
 ifndef GOOS
 	GOOS := linux
@@ -26,17 +25,23 @@ ifndef GOARCH
 	GOARCH := amd64
 endif
 
+BINNAME := $(PROJECT)-$(GOOS)-$(GOARCH)
+BIN := $(BINDIR)/$(BINNAME)
+
 SOURCES := $(shell find $(SRCDIR) -name '*.go')
 
-.PHONY: all clean deps
+.PHONY: all clean deps build
 
-all: $(BIN)
+all: build
+
+build: $(BIN)
 
 local:
-	@${MAKE} -B GOOS=$(shell go env GOHOSTOS) GOARCH=$(shell go env GOHOSTARCH) $(BIN)
+	@${MAKE} -B GOOS=$(shell go env GOHOSTOS) GOARCH=$(shell go env GOHOSTARCH) build
+	@ln -sf bin/$(PROJECT)-$(shell go env GOHOSTOS)-$(shell go env GOHOSTARCH) $(PROJECT)
 
 clean:
-	rm -Rf $(BIN) $(GOBUILDDIR)
+	rm -Rf bin $(GOBUILDDIR)
 
 deps:
 	@${MAKE} -B -s $(GOBUILDDIR)
@@ -44,6 +49,7 @@ deps:
 $(GOBUILDDIR):
 	@mkdir -p $(ORGDIR)
 	@rm -f $(REPODIR) && ln -s ../../../.. $(REPODIR)
+	@GOPATH=$(GOPATH) pulsar go flatten -V $(VENDORDIR)
 
 update-vendor:
 	@rm -Rf $(VENDORDIR)
@@ -63,9 +69,11 @@ update-vendor:
 		github.com/op/go-logging \
 		github.com/ryanuber/columnize \
 		github.com/spf13/cobra \
-		github.com/spf13/pflag
+		github.com/spf13/pflag \
+		github.com/YakLabs/k8s-client
 
 $(BIN): $(GOBUILDDIR) $(SOURCES)
+	@mkdir -p $(BINDIR)
 	docker run \
 		--rm \
 		-v $(ROOTDIR):/usr/code \
@@ -75,4 +83,4 @@ $(BIN): $(GOBUILDDIR) $(SOURCES)
 		-e CGO_ENABLED=0 \
 		-w /usr/code/ \
 		golang:$(GOVERSION) \
-		go build -a -installsuffix netgo -tags netgo -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/$(PROJECT) $(REPOPATH)
+		go build -a -installsuffix netgo -tags netgo -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/bin/$(BINNAME) $(REPOPATH)

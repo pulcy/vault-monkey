@@ -1,0 +1,95 @@
+#!/bin/bash
+
+TYPE=$1
+APIPATH=`echo ${TYPE} | tr '[:upper:]' '[:lower:]'`
+
+APIVERSION=${2:-v1}
+
+case ${APIVERSION} in
+    "extensions/v1beta1")
+        API=/apis/extensions/v1beta1
+        ;;
+    "v1")
+        API=/api/v1
+        ;;
+    "autoscaling/v1")
+        API=/apis/autoscaling/v1
+        ;;
+    *)
+        echo "unknown API"
+        exit -4
+        ;;
+esac
+
+cat <<EOF | gofmt > ${APIPATH}.go
+package http
+
+import (
+	k8s "github.com/YakLabs/k8s-client"
+	"github.com/pkg/errors"
+)
+
+
+func ${APIPATH}GeneratePath(namespace, name string) string {
+    if name == "" {
+        return "${API}/namespaces/"+namespace+"/${APIPATH}s"
+    }
+    return "${API}/namespaces/"+namespace+"/${APIPATH}s/"+name
+}
+
+// Get${TYPE} fetches a single ${TYPE}
+func (c *Client) Get${TYPE}(namespace, name string) (*k8s.${TYPE}, error) {
+	var out k8s.${TYPE}
+	_, err := c.do("GET", ${APIPATH}GeneratePath(namespace, name), nil, &out)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get ${TYPE}")
+	}
+	return &out, nil
+}
+
+// Create${TYPE} creates a new ${TYPE}. This will fail if it already exists.
+func (c *Client) Create${TYPE}(namespace string, item *k8s.${TYPE}) (*k8s.${TYPE}, error) {
+	item.TypeMeta.Kind = "${TYPE}"
+	item.TypeMeta.APIVersion = "${APIVERSION}"
+	item.ObjectMeta.Namespace = namespace
+
+	var out k8s.${TYPE}
+	_, err := c.do("POST", ${APIPATH}GeneratePath(namespace, ""), item, &out, 201)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create ${TYPE}")
+	}
+	return &out, nil
+}
+
+// List${TYPE}s lists all ${TYPE}s in a namespace
+func (c *Client) List${TYPE}s(namespace string, opts *k8s.ListOptions) (*k8s.${TYPE}List, error) {
+	var out k8s.${TYPE}List
+	_, err := c.do("GET", ${APIPATH}GeneratePath(namespace, "") + "?"+listOptionsQuery(opts), nil, &out)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list ${TYPE}s")
+	}
+	return &out, nil
+}
+
+// Delete${TYPE} deletes a single ${TYPE}. It will error if the ${TYPE} does not exist.
+func (c *Client) Delete${TYPE}(namespace, name string) error {
+	_, err := c.do("DELETE", ${APIPATH}GeneratePath(namespace, name), nil, nil)
+	return errors.Wrap(err, "failed to delete ${TYPE}")
+}
+
+// Update${TYPE} will update in place a single ${TYPE}. Generally, you should call
+// Get and then use that object for updates to ensure resource versions
+// avoid update conflicts
+func (c *Client) Update${TYPE}(namespace string, item *k8s.${TYPE}) (*k8s.${TYPE}, error) {
+	item.TypeMeta.Kind = "${TYPE}"
+	item.TypeMeta.APIVersion = "${APIVERSION}"
+    item.ObjectMeta.Namespace = namespace
+
+	var out k8s.${TYPE}
+	_, err := c.do("PUT", ${APIPATH}GeneratePath(namespace, item.Name), item, &out)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to update ${TYPE}")
+	}
+	return &out, nil
+}
+EOF

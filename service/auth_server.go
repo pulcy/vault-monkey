@@ -27,28 +27,35 @@ const (
 	clusterAuthPathPrefix  = "secret/cluster-auth/"
 	clusterAuthPathTmpl    = clusterAuthPathPrefix + "%s/job/%s"
 	clusterAuthUserIdField = "user-id"
+	jobIDEnvKey            = "VAULT_MONKEY_JOB_ID"
+	clusterIDEnvKey        = "VAULT_MONKEY_CLUSTER_ID"
+	machineIDEnvKey        = "VAULT_MONKEY_MACHINE_ID"
 )
 
-type ServerLoginData struct {
-	JobID         string
-	ClusterIDPath string
-	MachineIDPath string
+type ServerLoginData interface {
+	JobID() (string, error)
+	ClusterID() (string, error)
+	MachineID() (string, error)
 }
 
 // ServerLogin performs a 2-step login and initializes the vaultClient with the resulting token.
 func (s *VaultService) ServerLogin(data ServerLoginData) (*AuthenticatedVaultClient, error) {
 	// Read data
-	clusterID, err := readID(data.ClusterIDPath)
+	clusterID, err := data.ClusterID()
 	if err != nil {
 		return nil, maskAny(err)
 	}
 	clusterID = strings.ToLower(clusterID)
-	machineID, err := readID(data.MachineIDPath)
+	machineID, err := data.MachineID()
 	if err != nil {
 		return nil, maskAny(err)
 	}
 	machineID = strings.ToLower(machineID)
-	jobID := strings.ToLower(data.JobID)
+	jobID, err := data.JobID()
+	if err != nil {
+		return nil, maskAny(err)
+	}
+	jobID = strings.ToLower(jobID)
 
 	// Perform step 1 login
 	s.log.Debug("Step 1 login")
@@ -105,6 +112,123 @@ func (s *VaultService) ServerLogin(data ServerLoginData) (*AuthenticatedVaultCli
 
 	// We're done
 	return s.newAuthenticatedClient(vaultClient), nil
+}
+
+type baseServerLoginData struct {
+	next ServerLoginData
+}
+
+func (d *baseServerLoginData) JobID() (string, error) {
+	if d.next == nil {
+		return "", maskAny(fmt.Errorf("JobID not set"))
+	}
+	return d.next.JobID()
+}
+
+func (d *baseServerLoginData) ClusterID() (string, error) {
+	if d.next == nil {
+		return "", maskAny(fmt.Errorf("ClusterID not set"))
+	}
+	return d.next.ClusterID()
+}
+
+func (d *baseServerLoginData) MachineID() (string, error) {
+	if d.next == nil {
+		return "", maskAny(fmt.Errorf("MachineID not set"))
+	}
+	return d.next.MachineID()
+}
+
+// NewEnvServerLoginData creates a ServerLoginData that attempts to fetch the data from env variables.
+func NewEnvServerLoginData(next ServerLoginData) ServerLoginData {
+	return &envServerLoginData{baseServerLoginData{next}}
+}
+
+type envServerLoginData struct {
+	baseServerLoginData
+}
+
+func (d *envServerLoginData) JobID() (string, error) {
+	if v := os.Getenv(jobIDEnvKey); v != "" {
+		return v, nil
+	}
+	return d.baseServerLoginData.JobID()
+}
+
+func (d *envServerLoginData) ClusterID() (string, error) {
+	if v := os.Getenv(clusterIDEnvKey); v != "" {
+		return v, nil
+	}
+	return d.baseServerLoginData.ClusterID()
+}
+
+func (d *envServerLoginData) MachineID() (string, error) {
+	if v := os.Getenv(machineIDEnvKey); v != "" {
+		return v, nil
+	}
+	return d.baseServerLoginData.MachineID()
+}
+
+// NewStaticServerLoginData creates a ServerLoginData that attempts to fetch the data arguments given to this call.
+func NewStaticServerLoginData(jobID, clusterID, machineID string, next ServerLoginData) ServerLoginData {
+	return &staticServerLoginData{baseServerLoginData{next}, jobID, clusterID, machineID}
+}
+
+type staticServerLoginData struct {
+	baseServerLoginData
+	jobID, clusterID, machineID string
+}
+
+func (d *staticServerLoginData) JobID() (string, error) {
+	if v := d.jobID; v != "" {
+		return v, nil
+	}
+	return d.baseServerLoginData.JobID()
+}
+
+func (d *staticServerLoginData) ClusterID() (string, error) {
+	if v := d.clusterID; v != "" {
+		return v, nil
+	}
+	return d.baseServerLoginData.ClusterID()
+}
+
+func (d *staticServerLoginData) MachineID() (string, error) {
+	if v := d.machineID; v != "" {
+		return v, nil
+	}
+	return d.baseServerLoginData.MachineID()
+}
+
+// NewFileSystemServerLoginData creates a ServerLoginData that attempts to fetch the data file files given as arguments to this call.
+func NewFileSystemServerLoginData(jobIDPath, clusterIDPath, machineIDPath string, next ServerLoginData) ServerLoginData {
+	return &fsServerLoginData{baseServerLoginData{next}, jobIDPath, clusterIDPath, machineIDPath}
+}
+
+type fsServerLoginData struct {
+	baseServerLoginData
+	jobIDPath, clusterIDPath, machineIDPath string
+}
+
+func (d *fsServerLoginData) JobID() (string, error) {
+	if p := d.jobIDPath; p != "" {
+		return readID(p)
+	}
+	return d.baseServerLoginData.JobID()
+}
+
+func (d *fsServerLoginData) ClusterID() (string, error) {
+	if p := d.clusterIDPath; p != "" {
+		return readID(p)
+	}
+	return d.baseServerLoginData.ClusterID()
+}
+
+func (d *fsServerLoginData) MachineID() (string, error) {
+	if p := d.machineIDPath; p != "" {
+		return readID(p)
+	}
+	return d.baseServerLoginData.MachineID()
 }
 
 // readID read an id from a file with given path.

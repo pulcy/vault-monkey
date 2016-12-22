@@ -38,7 +38,11 @@ func init() {
 
 func cmdExtractFileRun(cmd *cobra.Command, args []string) {
 	// Check arguments
-	assertArgIsSet(extractFlags.targetFilePath, "--target")
+	if extractFlags.k8sSecretName != "" {
+		assertArgIsSet(extractFlags.k8sSecretKey, "--kubernetes-secret-key")
+	} else {
+		assertArgIsSet(extractFlags.targetFilePath, "--target")
+	}
 	if len(args) != 1 {
 		Exitf("Provide exactly one argument: <path>[#field]")
 	}
@@ -50,18 +54,30 @@ func cmdExtractFileRun(cmd *cobra.Command, args []string) {
 	}
 
 	// Login
-	c, err := serverLogin()
+	c, k8sclient, err := serverLogin()
 	if err != nil {
 		Exitf("Login failed: %#v", err)
 	}
 
-	// Create env file
-	secret := service.FileSecret{
-		SecretPath:  secretPath,
-		SecretField: secretField,
-	}
-	if err := c.CreateSecretFile(extractFlags.targetFilePath, secret); err != nil {
-		Exitf("Secret extraction failed: %v", err)
+	if extractFlags.k8sSecretName != "" {
+		// Create/update kubernetes secret
+		secret := service.EnvSecret{
+			SecretPath:     secretPath,
+			SecretField:    secretField,
+			EnvironmentKey: extractFlags.k8sSecretKey,
+		}
+		if err := c.CreateOrUpdateKubernetesSecret(k8sclient, extractFlags.k8sSecretName, secret); err != nil {
+			Exitf("Secret extraction failed: %v", err)
+		}
+	} else {
+		// Create secret file
+		secret := service.FileSecret{
+			SecretPath:  secretPath,
+			SecretField: secretField,
+		}
+		if err := c.CreateSecretFile(extractFlags.targetFilePath, secret); err != nil {
+			Exitf("Secret extraction failed: %v", err)
+		}
 	}
 }
 

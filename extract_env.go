@@ -38,7 +38,9 @@ func init() {
 
 func cmdExtractEnvRun(cmd *cobra.Command, args []string) {
 	// Check arguments
-	assertArgIsSet(extractFlags.targetFilePath, "--target")
+	if extractFlags.k8sSecretName == "" {
+		assertArgIsSet(extractFlags.targetFilePath, "--target")
+	}
 	if len(args) == 0 {
 		Exitf("Private at least one argument: <key>=<path>[#field]")
 	}
@@ -54,14 +56,21 @@ func cmdExtractEnvRun(cmd *cobra.Command, args []string) {
 	}
 
 	// Login
-	c, err := serverLogin()
+	c, k8sclient, err := serverLogin()
 	if err != nil {
 		Exitf("Login failed: %#v", err)
 	}
 
-	// Create env file
-	if err := c.CreateEnvironmentFile(extractFlags.targetFilePath, secrets); err != nil {
-		Exitf("Secret extraction failed: %v", err)
+	if extractFlags.k8sSecretName != "" {
+		// Create/update kubernetes secret
+		if err := c.CreateOrUpdateKubernetesSecret(k8sclient, extractFlags.k8sSecretName, secrets...); err != nil {
+			Exitf("Secret extraction failed: %v", err)
+		}
+	} else {
+		// Create env file
+		if err := c.CreateEnvironmentFile(extractFlags.targetFilePath, secrets); err != nil {
+			Exitf("Secret extraction failed: %v", err)
+		}
 	}
 }
 
