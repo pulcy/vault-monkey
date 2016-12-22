@@ -124,6 +124,41 @@ This will fetch keys from your password-store with path `MyVaultUnsealKey1`, `My
 Note that vault-monkey will shuffle the keys, so if your vault has 5 unseal keys with a threshold of 3
 if may ask for key3, key1, key5.
 
+## Kubernetes 
+
+Vault-monkey supports running inside a Kubernetes cluster and can extract secrets into Kubernetes secrets.
+
+### Machine ID detection 
+
+When using vault-monkey in Kubernetes, vault-monkey will automatically detect the ID of the machine it is running on.
+For that process it needs a name of the current pod or its IP address in case of pods that have `hostNetwork` set to `true`.
+
+`--kubernetes-pod-name=<podname>`
+Specifies the name of the current pod.
+
+`--kubernetes-pod-ip=<ip>`
+Specifies the IP address of the current pod.
+
+### Cluster ID detection 
+
+Then vault-monkey needs a cluster ID. It will fetch this cluster ID from a Kubernetes secret.
+
+`--kubernetes-cluster-info-secret-name=<secretname>`
+Specifies the name of the Kubernetes secret that holds the cluster ID.
+
+`--kubernetes-cluster-id-secret-key=<key>`
+Specifies the key inside the Kubernetes secret that holds the cluster ID.
+
+### Extracting secrets into Kubernetes secrets.
+
+To extract a secret from Vault into a Kubernetes secret, use `vault-monkey extract env` with these additional arguments:
+
+`--kubernetes-secret-name=<secretname>`
+This specifies the name of the Kubernetes secret that will be updated.
+
+`--kubernetes-secret-key=<key>`
+This specifies the key inside the Kubernetes secret that will be updated.
+
 ## Authentication Scheme
 
 Vault-monkey is designed to function in an environment with lots of servers, running lots of different
