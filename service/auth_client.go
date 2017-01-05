@@ -35,3 +35,7 @@ func (c *AuthenticatedVaultClient) Job() Job {
 func (c *AuthenticatedVaultClient) Token() string {
 	return c.vaultClient.Token()
 }
+
+func (c *AuthenticatedVaultClient) CA() CA {
+	return CA{vaultClient: c.vaultClient}
+}
