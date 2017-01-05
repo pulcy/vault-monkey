@@ -33,7 +33,7 @@ var (
 
 	cmdCACreateETCD = &cobra.Command{
 		Use:   "etcd",
-		Short: "Create vault CA that is to be used by ETCD",
+		Short: "Create vault CA that is to be used by ETCD members",
 		Run:   cmdCACreateETCDRun,
 	}
 
@@ -60,7 +60,7 @@ func cmdCACreateETCDRun(cmd *cobra.Command, args []string) {
 	}
 
 	ca := c.CA()
-	if err := ca.CreateETCD(caFlags.mountPoint); err != nil {
+	if err := ca.CreateETCDMembers(caFlags.mountPoint); err != nil {
 		Exitf("Failed to create CA: %v", err)
 	}
 }

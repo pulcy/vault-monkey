@@ -15,7 +15,7 @@ type CA struct {
 	vaultClient *api.Client
 }
 
-// CreateETCDMembers creates a CA for issues ETCD member certificates.
+// CreateETCDMembers creates a CA that issues ETCD member certificates.
 func (c *CA) CreateETCDMembers(mountPoint string) error {
 	if err := c.createRoot(mountPoint); err != nil {
 		return maskAny(err)
@@ -32,14 +32,15 @@ func (c *CA) CreateETCDMembers(mountPoint string) error {
 	return nil
 }
 
+// CreateK8s creates a CA that issues K8S member certificates for the various K8S components.
 func (c *CA) CreateK8s(mountPoint, component string) error {
 	if err := c.createRoot(mountPoint); err != nil {
 		return maskAny(err)
 	}
 	// Set role
-	relPath := path.Join(mountPoint, "roles/kubelet")
+	relPath := path.Join(mountPoint, "roles", component)
 	data := make(map[string]interface{})
-	data["allowed_domains"] = "kubelet"
+	data["allowed_domains"] = component
 	data["allow_bare_domains"] = "true"
 	data["allow_subdomains"] = "false"
 	data["max_ttl"] = "720h"
