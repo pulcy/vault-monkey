@@ -37,5 +37,5 @@ func (c *AuthenticatedVaultClient) Token() string {
 }
 
 func (c *AuthenticatedVaultClient) CA() CA {
-	return CA{vaultClient: c.vaultClient}
+	return CA{log: c.log, vaultClient: c.vaultClient}
 }

@@ -59,12 +59,16 @@ func init() {
 	globalFlags.VaultAddr = os.Getenv("VAULT_ADDR")
 	globalFlags.VaultCACert = os.Getenv("VAULT_CACERT")
 	globalFlags.VaultCAPath = os.Getenv("VAULT_CAPATH")
+	globalFlags.IPv4Only = boolFromEnv("VAULT_IPV4_ONLY", false)
+	globalFlags.IPv6Only = boolFromEnv("VAULT_IPV6_ONLY", false)
 	cmdMain.PersistentFlags().StringVar(&globalFlags.logLevel, "log-level", defaultLogLevel, "Log level (debug|info|warning|error)")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultAddr, "vault-addr", globalFlags.VaultAddr, "URL of the vault (defaults to VAULT_ADDR environment variable)")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultCACert, "vault-cacert", globalFlags.VaultCACert, "Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.VaultCAPath, "vault-capath", globalFlags.VaultCAPath, "Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate")
 	cmdMain.PersistentFlags().StringVar(&globalFlags.TokenPath, "token-path", "", "Path of a file containing your vault token (token defaults to VAULT_TOKEN environment variable)")
 	cmdMain.PersistentFlags().StringVarP(&globalFlags.ghToken, "github-token", "G", "", "Personal github token for administrator logins")
+	cmdMain.PersistentFlags().BoolVar(&globalFlags.IPv4Only, "vault-ipv4-only", globalFlags.IPv4Only, "If set, only use IPv4 addresses")
+	cmdMain.PersistentFlags().BoolVar(&globalFlags.IPv6Only, "vault-ipv6-only", globalFlags.IPv6Only, "If set, only use IPv6 addresses")
 }
 
 func main() {

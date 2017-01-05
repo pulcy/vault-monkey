@@ -17,6 +17,7 @@ package main
 import (
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/mitchellh/go-homedir"
@@ -40,4 +41,13 @@ func defaultGithubToken() string {
 		return ""
 	}
 	return strings.TrimSpace(string(content))
+}
+
+func boolFromEnv(key string, defaultValue bool) bool {
+	x := os.Getenv(key)
+	if x == "" {
+		return defaultValue
+	}
+	result, _ := strconv.ParseBool(x)
+	return result
 }

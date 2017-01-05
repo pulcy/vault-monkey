@@ -32,6 +32,8 @@ type VaultServiceConfig struct {
 	VaultCACert string // Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate
 	VaultCAPath string // Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate
 	TokenPath   string // Path of a file containing the login token
+	IPv4Only    bool   // If set, only use IPv4 addresses
+	IPv6Only    bool   // If set, only use IPv6 addresses
 }
 
 type VaultService struct {
@@ -40,6 +42,8 @@ type VaultService struct {
 	serverName   string
 	initialToken string
 	certPool     *x509.CertPool
+	ipv4Only     bool // If set, only use IPv4 addresses
+	ipv6Only     bool // If set, only use IPv6 addresses
 }
 
 type VaultClient struct {
@@ -94,6 +98,8 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 		serverName:   serverName,
 		initialToken: token,
 		certPool:     newCertPool,
+		ipv4Only:     srvCfg.IPv4Only,
+		ipv6Only:     srvCfg.IPv6Only,
 	}, nil
 }
 
@@ -186,6 +192,12 @@ func (s *VaultService) newClients() ([]VaultClient, error) {
 		preferIPv6 := j == 0
 		for _, ip := range ips {
 			isIPv6 := ip.To4() == nil
+			if isIPv6 && s.ipv4Only {
+				continue
+			}
+			if !isIPv6 && s.ipv6Only {
+				continue
+			}
 			if preferIPv6 == isIPv6 {
 				ipURL := *url
 				ipURL.Host = net.JoinHostPort(ip.String(), port)
