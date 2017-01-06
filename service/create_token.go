@@ -55,9 +55,10 @@ func (c *AuthenticatedVaultClient) CreateTokenFile(path string, tokenConfig Toke
 		if err != nil {
 			return maskAny(err)
 		}
-		token = secret.Auth.ClientToken
 		if tokenConfig.WrapTTL != "" {
 			token = secret.WrapInfo.Token
+		} else {
+			token = secret.Auth.ClientToken
 		}
 		return nil
 	}

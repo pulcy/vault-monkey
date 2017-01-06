@@ -39,6 +39,7 @@ var (
 		policies []string
 		role     string
 		template string
+		wrapTTL  string
 	}
 )
 
@@ -49,6 +50,7 @@ func init() {
 	cmdTokenCreate.Flags().StringSliceVar(&tokenFlags.policies, "policy", nil, " A list of policies for the token")
 	cmdTokenCreate.Flags().StringVar(&tokenFlags.role, "role", "", "If set, the token will be created against the given role")
 	cmdTokenCreate.Flags().StringVar(&tokenFlags.template, "template", "", "If set, the token will be wrapped in this Go text template (use {{.Token}})")
+	cmdTokenCreate.Flags().StringVar(&tokenFlags.wrapTTL, "wrap-ttl", "", "If set, the token will be wrapped for single use (cubbyhole) with this TTL")
 
 	cmdMain.AddCommand(cmdToken)
 }
@@ -66,6 +68,7 @@ func cmdTokenCreateRun(cmd *cobra.Command, args []string) {
 		Policies: tokenFlags.policies,
 		Role:     tokenFlags.role,
 		Template: tokenFlags.template,
+		WrapTTL:  tokenFlags.wrapTTL,
 	}); err != nil {
 		Exitf("Failed to create token: %v", err)
 	}
