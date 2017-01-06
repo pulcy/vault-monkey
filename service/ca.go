@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	caPolicyTemplate = `path "%s" { policy = "write" }`
+	caPolicyPathWriteTemplate = `path "%s" { policy = "write" }`
 )
 
 type CA struct {
@@ -147,9 +147,13 @@ func (c *CA) createAnyNameRole(mountPoint, role string) error {
 
 // createIssuePolicy creates a mountpoint specific role that allows issueing certificates.
 func (c *CA) createIssuePolicy(mountPoint, role string) (string, error) {
-	policyPath := path.Join(mountPoint, "issue", role)
-	policy := fmt.Sprintf(caPolicyTemplate, policyPath)
+	issuePath := path.Join(mountPoint, "issue", role)
+	rules := []string{
+		fmt.Sprintf(caPolicyPathWriteTemplate, issuePath),
+		fmt.Sprintf(caPolicyPathWriteTemplate, "auth/token/create*"),
+	}
 	name := path.Join(mountPoint, role)
+	policy := strings.Join(rules, "\n")
 	if err := c.vaultClient.Sys().PutPolicy(name, policy); err != nil {
 		return "", maskAny(err)
 	}

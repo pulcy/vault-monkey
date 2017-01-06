@@ -38,6 +38,7 @@ var (
 		path     string
 		policies []string
 		role     string
+		template string
 	}
 )
 
@@ -47,6 +48,7 @@ func init() {
 	cmdTokenCreate.Flags().StringVar(&tokenFlags.path, "path", "", "Path of the file in which the token will be written")
 	cmdTokenCreate.Flags().StringSliceVar(&tokenFlags.policies, "policy", nil, " A list of policies for the token")
 	cmdTokenCreate.Flags().StringVar(&tokenFlags.role, "role", "", "If set, the token will be created against the given role")
+	cmdTokenCreate.Flags().StringVar(&tokenFlags.template, "template", "", "If set, the token will be wrapped in this Go text template (use {{.Token}})")
 
 	cmdMain.AddCommand(cmdToken)
 }
@@ -63,6 +65,7 @@ func cmdTokenCreateRun(cmd *cobra.Command, args []string) {
 	if err := c.CreateTokenFile(tokenFlags.path, service.TokenConfig{
 		Policies: tokenFlags.policies,
 		Role:     tokenFlags.role,
+		Template: tokenFlags.template,
 	}); err != nil {
 		Exitf("Failed to create token: %v", err)
 	}

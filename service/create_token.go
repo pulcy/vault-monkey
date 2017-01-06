@@ -15,6 +15,8 @@
 package service
 
 import (
+	"bytes"
+	"html/template"
 	"io/ioutil"
 
 	"github.com/giantswarm/retry-go"
@@ -24,6 +26,8 @@ import (
 type TokenConfig struct {
 	Policies []string
 	Role     string
+	Template string
+	WrapTTL  string
 }
 
 // CreateTokenFile creates a new token with given config and stores it in a file.
@@ -33,6 +37,11 @@ func (c *AuthenticatedVaultClient) CreateTokenFile(path string, tokenConfig Toke
 	}
 	req := &api.TokenCreateRequest{
 		Policies: tokenConfig.Policies,
+	}
+	if tokenConfig.WrapTTL != "" {
+		c.vaultClient.SetWrappingLookupFunc(func(operation, path string) string {
+			return tokenConfig.WrapTTL
+		})
 	}
 	var token string
 	op := func() error {
@@ -47,12 +56,35 @@ func (c *AuthenticatedVaultClient) CreateTokenFile(path string, tokenConfig Toke
 			return maskAny(err)
 		}
 		token = secret.Auth.ClientToken
+		if tokenConfig.WrapTTL != "" {
+			token = secret.WrapInfo.Token
+		}
 		return nil
 	}
 	if err := retry.Do(op, retry.RetryChecker(IsVault), retry.MaxTries(3)); err != nil {
 		return maskAny(err)
 	}
-	if err := ioutil.WriteFile(path, []byte(token), 0400); err != nil {
+
+	content := []byte(token)
+	if tokenConfig.Template != "" {
+		// Put token in template
+		t, err := template.New("token").Parse(tokenConfig.Template)
+		if err != nil {
+			return maskAny(err)
+		}
+		data := struct {
+			Token string
+		}{
+			Token: token,
+		}
+		var buffer bytes.Buffer
+		if err := t.Execute(&buffer, data); err != nil {
+			return maskAny(err)
+		}
+		content = buffer.Bytes()
+	}
+
+	if err := ioutil.WriteFile(path, content, 0400); err != nil {
 		return maskAny(err)
 	}
 	return nil
