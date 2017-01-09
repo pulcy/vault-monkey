@@ -55,7 +55,7 @@ func (c *CA) CreateETCDMembers(clusterID string, force bool) error {
 // CreateK8sAll creates CA's that issues K8S member certificates for all K8S components.
 // Each component gets its own CA.
 func (c *CA) CreateK8sAll(clusterID string, force bool) error {
-	components := []string{"kubelet", "kube-proxy"}
+	components := []string{"kubelet", "kube-proxy", "kube-apiserver", "kube-controller-manager"}
 	for _, component := range components {
 		if err := c.CreateK8s(clusterID, component, force); err != nil {
 			return maskAny(err)
