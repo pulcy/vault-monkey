@@ -21,7 +21,7 @@ type CA struct {
 // createMountPoint creates the mointpoint for the PKI secret backend in the vault, based on the given
 // cluster-ID and service name.
 func (c *CA) createMountPoint(clusterID, service string) string {
-	return path.Join("ca", clusterID, "pki", service) + "/"
+	return path.Join("ca", clusterID, "pki", service)
 }
 
 // CreateETCDMembers creates a CA that issues ETCD member certificates.
@@ -44,6 +44,10 @@ func (c *CA) CreateETCDMembers(clusterID string, force bool) error {
 	if err := c.createTokenRole(role, []string{policy}); err != nil {
 		return maskAny(err)
 	}
+	// Create & allow job
+	if err := c.createJob(clusterID, "etcd", "", policy); err != nil {
+		return maskAny(err)
+	}
 
 	return nil
 }
@@ -51,7 +55,7 @@ func (c *CA) CreateETCDMembers(clusterID string, force bool) error {
 // CreateK8sAll creates CA's that issues K8S member certificates for all K8S components.
 // Each component gets its own CA.
 func (c *CA) CreateK8sAll(clusterID string, force bool) error {
-	components := []string{"kubelet"}
+	components := []string{"kubelet", "kube-proxy"}
 	for _, component := range components {
 		if err := c.CreateK8s(clusterID, component, force); err != nil {
 			return maskAny(err)
@@ -87,6 +91,10 @@ func (c *CA) CreateK8s(clusterID, component string, force bool) error {
 	if err := c.createTokenRole(role, []string{policy}); err != nil {
 		return maskAny(err)
 	}
+	// Create & allow job
+	if err := c.createJob(clusterID, "k8s", component, policy); err != nil {
+		return maskAny(err)
+	}
 
 	return nil
 }
@@ -99,7 +107,7 @@ func (c *CA) createRoot(mountPoint string, force bool) error {
 	if err != nil {
 		return maskAny(err)
 	}
-	if _, found := mounts[mountPoint]; found {
+	if _, found := mounts[mountPoint+"/"]; found {
 		// Already mounted
 		c.log.Debugf("pki already mounted at %s", mountPoint)
 		if !force {
@@ -147,6 +155,7 @@ func (c *CA) createAnyNameRole(mountPoint, role string) error {
 
 // createIssuePolicy creates a mountpoint specific role that allows issueing certificates.
 func (c *CA) createIssuePolicy(mountPoint, role string) (string, error) {
+	c.log.Debugf("creating issue policy for %s with role %s", mountPoint, role)
 	issuePath := path.Join(mountPoint, "issue", role)
 	rules := []string{
 		fmt.Sprintf(caPolicyPathWriteTemplate, issuePath),
@@ -164,6 +173,7 @@ func (c *CA) createIssuePolicy(mountPoint, role string) (string, error) {
 // createTokenRole creates a token role with given name and given allowed policies.
 func (c *CA) createTokenRole(role string, policies []string) error {
 	relPath := path.Join("auth/token/roles", role)
+	c.log.Debugf("creating token role at %s", relPath)
 	data := map[string]interface{}{
 		"period":           "720h",
 		"orphan":           "true",
@@ -173,5 +183,22 @@ func (c *CA) createTokenRole(role string, policies []string) error {
 		return maskAny(err)
 	}
 
+	return nil
+}
+
+// createJob creates a job such that vault-monkey can authenticate access it.
+func (c *CA) createJob(clusterID, service, component, policyName string) error {
+	jobID := fmt.Sprintf("ca-%s-pki-%s", clusterID, service)
+	if component != "" {
+		jobID = fmt.Sprintf("%s-%s", jobID, component)
+	}
+	c.log.Debugf("creating job %s with policy %s", jobID, policyName)
+	j := Job{c.vaultClient}
+	if err := j.Create(jobID, policyName); err != nil {
+		return maskAny(err)
+	}
+	if err := j.AllowCluster(jobID, clusterID); err != nil {
+		return maskAny(err)
+	}
 	return nil
 }

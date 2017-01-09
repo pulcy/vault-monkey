@@ -46,6 +46,7 @@ var (
 func init() {
 	cmdCluster.AddCommand(cmdClusterCreateCA)
 	cmdClusterCreateCA.AddCommand(cmdClusterCreateCAETCD)
+	cmdClusterCreateCA.AddCommand(cmdClusterCreateCAK8s)
 
 	cmdClusterCreateCA.PersistentFlags().BoolVar(&caFlags.force, "force", false, "If set, existing mounts will be overwritten, revoking issues certificates")
 	cmdClusterCreateCAK8s.Flags().StringVar(&caFlags.component, "component", "", "The Kubernetes component name to create a CA for")
