@@ -20,16 +20,16 @@ import (
 )
 
 var (
-	cmdClusterIssueCertificate = &cobra.Command{
-		Use:   "issue-cert",
+	cmdCAIssue = &cobra.Command{
+		Use:   "issue",
 		Short: "Create vault information for a new cluster specific CA",
 		Run:   showUsage,
 	}
 
-	cmdClusterIssueK8sCertificate = &cobra.Command{
+	cmdCAIssueK8s = &cobra.Command{
 		Use:   "k8s",
 		Short: "Issue an operation certificate to access the Kubernetes API server.",
-		Run:   cmdClusterIssueK8sCertificateRun,
+		Run:   cmdCAIssueK8sRun,
 	}
 
 	caIssueFlags struct {
@@ -39,19 +39,19 @@ var (
 )
 
 func init() {
-	cmdCluster.AddCommand(cmdClusterIssueCertificate)
-	cmdClusterIssueCertificate.AddCommand(cmdClusterIssueK8sCertificate)
+	cmdCA.AddCommand(cmdCAIssue)
+	cmdCAIssue.AddCommand(cmdCAIssueK8s)
 
 	defaultOutputDir, err := homedir.Expand("~/.pulcy/certs")
 	if err != nil {
 		Exitf("Failed to expand homedir: %#v\n", err)
 	}
-	cmdClusterIssueCertificate.PersistentFlags().StringVar(&caIssueFlags.outputDir, "destination", defaultOutputDir, "Where to store the issued certificates")
-	cmdClusterIssueCertificate.PersistentFlags().StringVar(&caIssueFlags.userName, "username", "", "Name of the user")
+	cmdCAIssue.PersistentFlags().StringVar(&caIssueFlags.outputDir, "destination", defaultOutputDir, "Where to store the issued certificates")
+	cmdCAIssue.PersistentFlags().StringVar(&caIssueFlags.userName, "username", "", "Name of the user")
 }
 
-func cmdClusterIssueK8sCertificateRun(cmd *cobra.Command, args []string) {
-	assertArgIsSet(clusterFlags.clusterID, "cluster-id")
+func cmdCAIssueK8sRun(cmd *cobra.Command, args []string) {
+	assertArgIsSet(caFlags.clusterID, "cluster-id")
 	assertArgIsSet(caIssueFlags.outputDir, "destination")
 	assertArgIsSet(caIssueFlags.userName, "username")
 
@@ -61,7 +61,7 @@ func cmdClusterIssueK8sCertificateRun(cmd *cobra.Command, args []string) {
 	}
 
 	ca := c.CA()
-	if err := ca.IssueK8sUserCertificate(clusterFlags.clusterID, caIssueFlags.userName, caIssueFlags.outputDir); err != nil {
+	if err := ca.IssueK8sUserCertificate(caFlags.clusterID, caIssueFlags.userName, caIssueFlags.outputDir); err != nil {
 		Exitf("Failed to issue certificate: %v", err)
 	}
 }
