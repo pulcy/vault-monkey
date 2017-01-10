@@ -11,6 +11,7 @@ import (
 
 const (
 	caPolicyPathWriteTemplate = `path "%s" { policy = "write" }`
+	roleOperations            = "operations"
 )
 
 type CA struct {
@@ -61,6 +62,12 @@ func (c *CA) CreateK8sAll(clusterID string, force bool) error {
 			return maskAny(err)
 		}
 	}
+	// Set role for creating user certificates
+	mountPoint := c.createMountPoint(clusterID, "k8s")
+	if err := c.createAnyNameRole(mountPoint, roleOperations); err != nil {
+		return maskAny(err)
+	}
+
 	return nil
 }
 
