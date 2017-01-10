@@ -240,11 +240,43 @@ path "sys/policy/cluster_auth_*" {
 }
 
 // Allow operations to access all normal secrets
-// This is not needed for vault-monkey, but it likely to be convenient.
 path "secret/*" {
     policy = "write"
 }
+
+// Allow reading mounts 
+path "sys/mounts" {
+    policy = "read"
+}
+
+// Allow creating CA mounts 
+path "sys/mounts/ca/*" {
+    policy = "write"
+}
+
+// Allow accessing CA mounts
+path "ca/*" {
+    policy = "write"
+}
+
+// Allow creating token roles
+path "auth/token/roles/*" {
+    policy = "write"
+}
+
+// Allow creating CA related policies
+path "sys/policy/ca/*" {
+    policy = "write"
+}
 ```
+
+## Environment variables 
+
+- `VAULT_ADDR`:      Environment variable variant of the `--vault-addr` command line argument.
+- `VAULT_CACERT`:    Environment variable variant of the `--vault-cacert` command line argument.
+- `VAULT_CAPATH`:    Environment variable variant of the `--vault-capath` command line argument.
+- `VAULT_IPV4_ONLY`: If set to `true`, vault-monkey will only use IPv4 addresses to connect to the vault.
+- `VAULT_IPV6_ONLY`: If set to `true`, vault-monkey will only use IPv6 addresses to connect to the vault.
 
 ## Building
 

@@ -68,6 +68,8 @@ func (s *VaultService) ServerLogin(data ServerLoginData) (*AuthenticatedVaultCli
 	step1Data := make(map[string]interface{})
 	step1Data["app_id"] = clusterID
 	step1Data["user_id"] = machineID
+	//s.log.Debugf("cluster-id %s", clusterID)
+	//s.log.Debugf("machine-id %s", machineID)
 	s.log.Debugf("write step1Data to %s", address)
 	if loginSecret, err := logical.Write("auth/app-id/login", step1Data); err != nil {
 		return nil, maskAny(err)
@@ -81,6 +83,7 @@ func (s *VaultService) ServerLogin(data ServerLoginData) (*AuthenticatedVaultCli
 	// Read cluster/job specific user-id
 	s.log.Debugf("Fetch cluster+job specific user-id at %s", address)
 	userIdPath := fmt.Sprintf(clusterAuthPathTmpl, clusterID, jobID)
+	s.log.Debugf("Fetch cluster+job specific user-id from %s", userIdPath)
 	userIdSecret, err := logical.Read(userIdPath)
 	if err != nil {
 		return nil, maskAny(err)
@@ -98,6 +101,8 @@ func (s *VaultService) ServerLogin(data ServerLoginData) (*AuthenticatedVaultCli
 	// Perform step 2 login
 	s.log.Debug("Step 2 login")
 	vaultClient.ClearToken()
+	//s.log.Debugf("app-id %s", jobID)
+	//s.log.Debugf("user-id %s", userId)
 	step2Data := make(map[string]interface{})
 	step2Data["app_id"] = jobID
 	step2Data["user_id"] = userId
