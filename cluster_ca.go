@@ -38,8 +38,9 @@ var (
 	}
 
 	caFlags struct {
-		force     bool
-		component string
+		force      bool
+		component  string
+		domainName string
 	}
 )
 
@@ -50,6 +51,7 @@ func init() {
 
 	cmdClusterCreateCA.PersistentFlags().BoolVar(&caFlags.force, "force", false, "If set, existing mounts will be overwritten, revoking issues certificates")
 	cmdClusterCreateCAK8s.Flags().StringVar(&caFlags.component, "component", "", "The Kubernetes component name to create a CA for")
+	cmdClusterCreateCAK8s.Flags().StringVar(&caFlags.domainName, "domain", "", "Domain name of the cluster")
 }
 
 func cmdClusterCreateCAETCDRun(cmd *cobra.Command, args []string) {
@@ -68,6 +70,7 @@ func cmdClusterCreateCAETCDRun(cmd *cobra.Command, args []string) {
 
 func cmdClusterCreateCAK8sRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(clusterFlags.clusterID, "cluster-id")
+	assertArgIsSet(caFlags.domainName, "domain")
 
 	_, c, err := adminLogin()
 	if err != nil {
@@ -76,11 +79,11 @@ func cmdClusterCreateCAK8sRun(cmd *cobra.Command, args []string) {
 
 	ca := c.CA()
 	if caFlags.component != "" {
-		if err := ca.CreateK8s(clusterFlags.clusterID, caFlags.component, caFlags.force); err != nil {
+		if err := ca.CreateK8s(clusterFlags.clusterID, caFlags.component, caFlags.domainName, caFlags.force); err != nil {
 			Exitf("Failed to create CA: %v", err)
 		}
 	} else {
-		if err := ca.CreateK8sAll(clusterFlags.clusterID, caFlags.force); err != nil {
+		if err := ca.CreateK8sAll(clusterFlags.clusterID, caFlags.domainName, caFlags.force); err != nil {
 			Exitf("Failed to create CA's: %v", err)
 		}
 	}

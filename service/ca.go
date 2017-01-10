@@ -55,10 +55,10 @@ func (c *CA) CreateETCDMembers(clusterID string, force bool) error {
 
 // CreateK8sAll creates CA's that issues K8S member certificates for all K8S components.
 // Each component gets its own CA.
-func (c *CA) CreateK8sAll(clusterID string, force bool) error {
+func (c *CA) CreateK8sAll(clusterID, domainName string, force bool) error {
 	components := []string{"kubelet", "kube-proxy", "kube-apiserver", "kube-controller-manager", "kube-scheduler"}
 	for _, component := range components {
-		if err := c.CreateK8s(clusterID, component, force); err != nil {
+		if err := c.CreateK8s(clusterID, component, domainName, force); err != nil {
 			return maskAny(err)
 		}
 	}
@@ -72,17 +72,21 @@ func (c *CA) CreateK8sAll(clusterID string, force bool) error {
 }
 
 // CreateK8s creates a CA that issues K8S member certificates for the various K8S components.
-func (c *CA) CreateK8s(clusterID, component string, force bool) error {
+func (c *CA) CreateK8s(clusterID, component, domainName string, force bool) error {
 	mountPoint := c.createMountPoint(clusterID, "k8s")
 	if err := c.createRoot(mountPoint, force); err != nil {
 		return maskAny(err)
 	}
 	// Set role
 	relPath := path.Join(mountPoint, "roles", component)
+	allowedDomains := []string{component}
+	if domainName != "" {
+		allowedDomains = append(allowedDomains, domainName)
+	}
 	data := map[string]interface{}{
-		"allowed_domains":    component,
+		"allowed_domains":    strings.Join(allowedDomains, ","),
 		"allow_bare_domains": "true",
-		"allow_subdomains":   "false",
+		"allow_subdomains":   "true",
 		"max_ttl":            "720h",
 	}
 	if _, err := c.vaultClient.Logical().Write(relPath, data); err != nil {
