@@ -68,7 +68,7 @@ func (c *K8sClient) ClusterID() (string, error) {
 	if c.clusterInfoSecretName != "" && c.clusterIDSecretKey != "" {
 		s, err := c.getKubernetesSecret(c.clusterInfoSecretName)
 		if err != nil {
-			fmt.Printf("ClusterInfo secret with name '%s' not found", c.clusterInfoSecretName)
+			fmt.Printf("ClusterInfo secret with name '%s' not found %#v\n", c.clusterInfoSecretName, err)
 			// Now fallback to next
 		} else {
 			v, found := s.Data[c.clusterIDSecretKey]
