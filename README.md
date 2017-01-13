@@ -268,6 +268,11 @@ path "auth/token/roles/*" {
 path "sys/policy/ca/*" {
     policy = "write"
 }
+
+// Allow creating secret related policies
+path "sys/policy/secret/*" {
+    policy = "write"
+}
 ```
 
 ## Environment variables 

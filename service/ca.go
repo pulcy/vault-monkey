@@ -2,16 +2,20 @@ package service
 
 import (
 	"fmt"
+	"os/exec"
 	"path"
 	"strings"
 
 	"github.com/hashicorp/vault/api"
+	"github.com/juju/errgo"
 	logging "github.com/op/go-logging"
 )
 
 const (
-	caPolicyPathWriteTemplate = `path "%s" { policy = "write" }`
-	roleOperations            = "operations"
+	caPolicyPathReadTemplate    = `path "%s" { policy = "read" }`
+	caPolicyPathWriteTemplate   = `path "%s" { policy = "write" }`
+	roleOperations              = "operations"
+	compNameKubeServiceAccounts = "kube-serviceaccounts"
 )
 
 type CA struct {
@@ -67,6 +71,10 @@ func (c *CA) CreateK8sAll(clusterID, domainName string, force bool) error {
 	if err := c.createAnyNameRole(mountPoint, roleOperations); err != nil {
 		return maskAny(err)
 	}
+	// Create service-accounts token
+	if err := c.createK8sServiceAccountToken(clusterID, force); err != nil {
+		return maskAny(err)
+	}
 
 	return nil
 }
@@ -107,6 +115,65 @@ func (c *CA) CreateK8s(clusterID, component, domainName string, force bool) erro
 		return maskAny(err)
 	}
 
+	return nil
+}
+
+// createK8sServiceAccountToken creates a service-account-token secret used by K8S.
+// Roles & policies to access it are also created.
+func (c *CA) createK8sServiceAccountToken(clusterID string, force bool) error {
+	tokenSecretPath := path.Join("secret", clusterID, "k8s", "token")
+	// Create and store secret
+	if err := c.createK8sServiceAccountTokenSecret(tokenSecretPath, force); err != nil {
+		return maskAny(err)
+	}
+	// Create read secret policy
+	policy, err := c.createReadSecretPolicy(tokenSecretPath, compNameKubeServiceAccounts)
+	if err != nil {
+		return maskAny(err)
+	}
+	// Create token role
+	role := fmt.Sprintf("k8s-%s-%s", clusterID, compNameKubeServiceAccounts)
+	if err := c.createTokenRole(role, []string{policy}); err != nil {
+		return maskAny(err)
+	}
+	// Create & allow job
+	if err := c.createJob(clusterID, "k8s", compNameKubeServiceAccounts, policy); err != nil {
+		return maskAny(err)
+	}
+
+	return nil
+}
+
+// createK8sServiceAccountTokenSecret creates the actual token secret (if not exists or forced)
+func (c *CA) createK8sServiceAccountTokenSecret(secretPath string, force bool) error {
+	secretField := "key"
+	if !force {
+		// Look if secret already exists
+		secret, err := c.vaultClient.Logical().Read(secretPath)
+		if err != nil {
+			return maskAny(errgo.WithCausef(nil, VaultError, "error reading %s: %s", secretPath, err))
+		}
+		if secret != nil {
+			if _, ok := secret.Data[secretField]; ok {
+				// Secret already found
+				return nil
+			}
+		}
+	}
+	// Create secret
+	cmd := exec.Command("openssl", "genrsa", "4096")
+	output, err := cmd.Output()
+	if err != nil {
+		return maskAny(errgo.WithCausef(nil, VaultError, "failed to generate token key at %s: %s", secretPath, err))
+	}
+
+	// Write secret
+	data := map[string]interface{}{
+		secretField: string(output),
+	}
+	if _, err := c.vaultClient.Logical().Write(secretPath, data); err != nil {
+		return maskAny(err)
+	}
 	return nil
 }
 
@@ -173,6 +240,22 @@ func (c *CA) createIssuePolicy(mountPoint, role string) (string, error) {
 		fmt.Sprintf(caPolicyPathWriteTemplate, "auth/token/create*"),
 	}
 	name := path.Join(mountPoint, role)
+	policy := strings.Join(rules, "\n")
+	if err := c.vaultClient.Sys().PutPolicy(name, policy); err != nil {
+		return "", maskAny(err)
+	}
+
+	return name, nil
+}
+
+// createIssuePolicy creates a mountpoint specific role that allows issueing certificates.
+func (c *CA) createReadSecretPolicy(secretPath, role string) (string, error) {
+	c.log.Debugf("creating read secret policy for %s with role %s", secretPath, role)
+	rules := []string{
+		fmt.Sprintf(caPolicyPathReadTemplate, secretPath),
+		fmt.Sprintf(caPolicyPathWriteTemplate, "auth/token/create*"),
+	}
+	name := path.Join(secretPath, role)
 	policy := strings.Join(rules, "\n")
 	if err := c.vaultClient.Sys().PutPolicy(name, policy); err != nil {
 		return "", maskAny(err)
