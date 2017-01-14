@@ -41,6 +41,7 @@ var (
 
 	caIssueFlags struct {
 		serverLogin bool
+		force       bool
 		service.IssueConfig
 	}
 )
@@ -55,6 +56,7 @@ func init() {
 		Exitf("Failed to expand homedir: %#v\n", err)
 	}
 	cmdCAIssue.PersistentFlags().BoolVar(&caIssueFlags.serverLogin, "server", false, "If set, a server login is performed (instead of admin login)")
+	cmdCAIssue.PersistentFlags().BoolVar(&caIssueFlags.force, "force", false, "If set, a new certificate will always be issued")
 	cmdCAIssue.PersistentFlags().StringVar(&caIssueFlags.IssueConfig.OutputDir, "destination", defaultOutputDir, "Where to store the issued certificates")
 	cmdCAIssue.PersistentFlags().StringVar(&caIssueFlags.CommonName, "common-name", caIssueFlags.CommonName, "CommonName of the user")
 	cmdCAIssue.PersistentFlags().StringVar(&caIssueFlags.Role, "role", caIssueFlags.Role, "Role used to issue certificate")
@@ -70,6 +72,14 @@ func cmdCAIssueETCDRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(caFlags.clusterID, "cluster-id")
 	assertArgIsSet(caIssueFlags.OutputDir, "destination")
 	assertArgIsSet(caIssueFlags.CommonName, "common-name")
+
+	caIssueFlags.IssueConfig.SetupDefaults(caFlags.clusterID)
+	if !caIssueFlags.force {
+		if !caIssueFlags.IssueConfig.IssueIsNeeded(log) {
+			log.Infof("Certificate already exists")
+			return
+		}
+	}
 
 	var c *service.AuthenticatedVaultClient
 	var err error
@@ -95,6 +105,14 @@ func cmdCAIssueK8sRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(caFlags.clusterID, "cluster-id")
 	assertArgIsSet(caIssueFlags.OutputDir, "destination")
 	assertArgIsSet(caIssueFlags.CommonName, "common-name")
+
+	caIssueFlags.IssueConfig.SetupDefaults(caFlags.clusterID)
+	if !caIssueFlags.force {
+		if !caIssueFlags.IssueConfig.IssueIsNeeded(log) {
+			log.Infof("Certificate already exists")
+			return
+		}
+	}
 
 	var c *service.AuthenticatedVaultClient
 	var err error

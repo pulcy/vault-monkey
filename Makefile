@@ -56,6 +56,7 @@ update-vendor:
 	@pulsar go vendor -V $(VENDORDIR) \
 		github.com/coreos/etcd/client \
 		github.com/dchest/uniuri \
+		github.com/dustin/go-humanize \
 		github.com/giantswarm/retry-go \
 		github.com/hashicorp/consul/api \
 		github.com/hashicorp/go-rootcerts \
