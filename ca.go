@@ -15,14 +15,18 @@
 package main
 
 import (
+	"io/ioutil"
+	"strings"
+
 	"github.com/spf13/cobra"
 )
 
 var (
 	cmdCA = &cobra.Command{
-		Use:   "ca",
-		Short: "Administrator commands to create CA's and issue certificates",
-		Run:   showUsage,
+		Use:              "ca",
+		Short:            "Administrator commands to create CA's and issue certificates",
+		Run:              showUsage,
+		PersistentPreRun: cmdCAPersistentPreRun,
 	}
 
 	cmdCACreate = &cobra.Command{
@@ -44,10 +48,11 @@ var (
 	}
 
 	caFlags struct {
-		clusterID  string
-		force      bool
-		component  string
-		domainName string
+		clusterID     string
+		clusterIDFile string
+		force         bool
+		component     string
+		domainName    string
 	}
 )
 
@@ -58,9 +63,20 @@ func init() {
 	cmdCACreate.AddCommand(cmdCACreateK8s)
 
 	cmdCA.PersistentFlags().StringVar(&caFlags.clusterID, "cluster-id", "", "ID of the cluster to create a CA for")
+	cmdCA.PersistentFlags().StringVar(&caFlags.clusterIDFile, "cluster-id-file", "", "Path of the file containing cluster-id")
 	cmdCACreate.PersistentFlags().BoolVar(&caFlags.force, "force", false, "If set, existing mounts will be overwritten, revoking issues certificates")
 	cmdCACreateK8s.Flags().StringVar(&caFlags.component, "component", "", "The Kubernetes component name to create a CA for")
 	cmdCACreateK8s.Flags().StringVar(&caFlags.domainName, "domain", "", "Domain name of the cluster")
+}
+
+func cmdCAPersistentPreRun(cmd *cobra.Command, args []string) {
+	if caFlags.clusterID == "" && caFlags.clusterIDFile != "" {
+		raw, err := ioutil.ReadFile(caFlags.clusterIDFile)
+		if err != nil {
+			Exitf("Failed to read %s: %#v\n", caFlags.clusterIDFile, err)
+		}
+		caFlags.clusterID = strings.TrimSpace(string(raw))
+	}
 }
 
 func cmdCACreateETCDRun(cmd *cobra.Command, args []string) {

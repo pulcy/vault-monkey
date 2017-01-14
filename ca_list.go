@@ -23,6 +23,12 @@ var (
 		Run:   showUsage,
 	}
 
+	cmdCAListETCD = &cobra.Command{
+		Use:   "etcd",
+		Short: "List certificates issued to access the ETCD cluster.",
+		Run:   cmdCAListETCDRun,
+	}
+
 	cmdCAListK8s = &cobra.Command{
 		Use:   "k8s",
 		Short: "List certificates issued to access the Kubernetes API server.",
@@ -32,7 +38,22 @@ var (
 
 func init() {
 	cmdCA.AddCommand(cmdCAList)
+	cmdCAList.AddCommand(cmdCAListETCD)
 	cmdCAList.AddCommand(cmdCAListK8s)
+}
+
+func cmdCAListETCDRun(cmd *cobra.Command, args []string) {
+	assertArgIsSet(caFlags.clusterID, "cluster-id")
+
+	_, c, err := adminLogin()
+	if err != nil {
+		Exitf("Login failed: %v", err)
+	}
+
+	ca := c.CA()
+	if err := ca.ListETCDCertificates(caFlags.clusterID); err != nil {
+		Exitf("Failed to list certificates: %v", err)
+	}
 }
 
 func cmdCAListK8sRun(cmd *cobra.Command, args []string) {

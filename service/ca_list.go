@@ -12,9 +12,25 @@ import (
 	"github.com/ryanuber/columnize"
 )
 
+// ListETCDCertificates issues a new certificate for a specific service.
+func (c *CA) ListETCDCertificates(clusterID string) error {
+	if err := c.ListCertificates(clusterID, "etcd"); err != nil {
+		return maskAny(err)
+	}
+	return nil
+}
+
 // ListK8sCertificates issues a new certificate for a specific service.
 func (c *CA) ListK8sCertificates(clusterID string) error {
-	mountPoint := c.createMountPoint(clusterID, "k8s")
+	if err := c.ListCertificates(clusterID, "k8s"); err != nil {
+		return maskAny(err)
+	}
+	return nil
+}
+
+// ListCertificates issues a new certificate for a specific service.
+func (c *CA) ListCertificates(clusterID, service string) error {
+	mountPoint := c.createMountPoint(clusterID, service)
 	listPath := path.Join(mountPoint, "certs")
 	secret, err := c.vaultClient.Logical().List(listPath)
 	if err != nil {
@@ -31,8 +47,8 @@ func (c *CA) ListK8sCertificates(clusterID string) error {
 	lines := []string{"CommonName | Expiration | Serial"}
 	for _, k := range keys {
 		key := k.(string)
-		if line, err := c.showCertificate(clusterID, key); err != nil {
-			return maskAny(err)
+		if line, err := c.showCertificate(clusterID, service, key); err != nil {
+			c.log.Errorf("Cannot show certificate %s: %#v", key, err)
 		} else {
 			lines = append(lines, line)
 		}
@@ -43,8 +59,8 @@ func (c *CA) ListK8sCertificates(clusterID string) error {
 	return nil
 }
 
-func (c *CA) showCertificate(clusterID, serial string) (string, error) {
-	mountPoint := c.createMountPoint(clusterID, "k8s")
+func (c *CA) showCertificate(clusterID, service, serial string) (string, error) {
+	mountPoint := c.createMountPoint(clusterID, service)
 	certPath := path.Join(mountPoint, "cert", serial)
 	secret, err := c.vaultClient.Logical().Read(certPath)
 	if err != nil {
