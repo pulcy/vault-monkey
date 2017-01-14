@@ -14,6 +14,7 @@ import (
 const (
 	caPolicyPathReadTemplate    = `path "%s" { policy = "read" }`
 	caPolicyPathWriteTemplate   = `path "%s" { policy = "write" }`
+	roleMember                  = "member"
 	roleOperations              = "operations"
 	compNameKubeServiceAccounts = "kube-serviceaccounts"
 )
@@ -36,11 +37,11 @@ func (c *CA) CreateETCDMembers(clusterID string, force bool) error {
 		return maskAny(err)
 	}
 	// Set role
-	if err := c.createAnyNameRole(mountPoint, "member"); err != nil {
+	if err := c.createAnyNameRole(mountPoint, roleMember); err != nil {
 		return maskAny(err)
 	}
 	// Create certificate issue policy
-	policy, err := c.createIssuePolicy(mountPoint, "member")
+	policy, err := c.createIssuePolicy(mountPoint, roleMember)
 	if err != nil {
 		return maskAny(err)
 	}
