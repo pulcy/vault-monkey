@@ -14,6 +14,7 @@ import (
 const (
 	caPolicyPathReadTemplate    = `path "%s" { policy = "read" }`
 	caPolicyPathWriteTemplate   = `path "%s" { policy = "write" }`
+	roleMember                  = "member"
 	roleOperations              = "operations"
 	compNameKubeServiceAccounts = "kube-serviceaccounts"
 )
@@ -30,17 +31,17 @@ func (c *CA) createMountPoint(clusterID, service string) string {
 }
 
 // CreateETCDMembers creates a CA that issues ETCD member certificates.
-func (c *CA) CreateETCDMembers(clusterID string, force bool) error {
+func (c *CA) CreateETCDMembers(clusterID, domainName string, force bool) error {
 	mountPoint := c.createMountPoint(clusterID, "etcd")
-	if err := c.createRoot(mountPoint, force); err != nil {
+	if err := c.createRoot(mountPoint, domainName, "etcd", force); err != nil {
 		return maskAny(err)
 	}
 	// Set role
-	if err := c.createAnyNameRole(mountPoint, "member"); err != nil {
+	if err := c.createAnyNameRole(mountPoint, roleMember); err != nil {
 		return maskAny(err)
 	}
 	// Create certificate issue policy
-	policy, err := c.createIssuePolicy(mountPoint, "member")
+	policy, err := c.createIssuePolicy(mountPoint, roleMember)
 	if err != nil {
 		return maskAny(err)
 	}
@@ -82,7 +83,7 @@ func (c *CA) CreateK8sAll(clusterID, domainName string, force bool) error {
 // CreateK8s creates a CA that issues K8S member certificates for the various K8S components.
 func (c *CA) CreateK8s(clusterID, component, domainName string, force bool) error {
 	mountPoint := c.createMountPoint(clusterID, "k8s")
-	if err := c.createRoot(mountPoint, force); err != nil {
+	if err := c.createRoot(mountPoint, domainName, "k8s", force); err != nil {
 		return maskAny(err)
 	}
 	// Set role
@@ -179,7 +180,7 @@ func (c *CA) createK8sServiceAccountTokenSecret(secretPath string, force bool) e
 
 // createRoot mounts the PKI backend at the given mountpoint and
 // creates the root certificate.
-func (c *CA) createRoot(mountPoint string, force bool) error {
+func (c *CA) createRoot(mountPoint, domain, service string, force bool) error {
 	// Check if there is already a PKI mounted at the given mountpoint
 	mounts, err := c.vaultClient.Sys().ListMounts()
 	if err != nil {
@@ -210,7 +211,7 @@ func (c *CA) createRoot(mountPoint string, force bool) error {
 	c.log.Debugf("generating root certificate pki at %s", mountPoint)
 	relPath := path.Join(mountPoint, "root/generate/internal")
 	data := make(map[string]interface{})
-	data["common_name"] = mountPoint
+	data["common_name"] = fmt.Sprintf("%s.%s", service, domain)
 	data["ttl"] = "87600h"
 	if _, err := c.vaultClient.Logical().Write(relPath, data); err != nil {
 		return maskAny(err)
