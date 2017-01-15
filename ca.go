@@ -65,8 +65,8 @@ func init() {
 	cmdCA.PersistentFlags().StringVar(&caFlags.clusterID, "cluster-id", "", "ID of the cluster to create a CA for")
 	cmdCA.PersistentFlags().StringVar(&caFlags.clusterIDFile, "cluster-id-file", "", "Path of the file containing cluster-id")
 	cmdCACreate.PersistentFlags().BoolVar(&caFlags.force, "force", false, "If set, existing mounts will be overwritten, revoking issues certificates")
+	cmdCACreate.PersistentFlags().StringVar(&caFlags.domainName, "domain", "", "Domain name of the cluster")
 	cmdCACreateK8s.Flags().StringVar(&caFlags.component, "component", "", "The Kubernetes component name to create a CA for")
-	cmdCACreateK8s.Flags().StringVar(&caFlags.domainName, "domain", "", "Domain name of the cluster")
 }
 
 func cmdCAPersistentPreRun(cmd *cobra.Command, args []string) {
@@ -81,6 +81,7 @@ func cmdCAPersistentPreRun(cmd *cobra.Command, args []string) {
 
 func cmdCACreateETCDRun(cmd *cobra.Command, args []string) {
 	assertArgIsSet(caFlags.clusterID, "cluster-id")
+	assertArgIsSet(caFlags.domainName, "domain")
 
 	_, c, err := adminLogin()
 	if err != nil {
@@ -88,7 +89,7 @@ func cmdCACreateETCDRun(cmd *cobra.Command, args []string) {
 	}
 
 	ca := c.CA()
-	if err := ca.CreateETCDMembers(caFlags.clusterID, caFlags.force); err != nil {
+	if err := ca.CreateETCDMembers(caFlags.clusterID, caFlags.domainName, caFlags.force); err != nil {
 		Exitf("Failed to create CA: %v", err)
 	}
 }
