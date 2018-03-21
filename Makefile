@@ -107,6 +107,9 @@ $(BIN): $(GOBUILDDIR) $(SOURCES)
 
 docker: $(BIN)
 	docker build --build-arg arch=$(GOARCH) -t $(DOCKERIMAGE)-$(GOARCH) -f Dockerfile.build .
+ifdef PUSHIMAGES
+	docker push $(DOCKERIMAGE)-$(GOARCH)
+endif
 
 $(MANIFESTTOOL):
 	go get github.com/estesp/manifest-tool
@@ -121,4 +124,4 @@ push-manifest: $(MANIFESTTOOL)
 
 .PHONY: release
 release:
-	@${MAKE} -B DOCKERIMAGE=pulcy/$(shell pulsar docker-tag) all push-manifest
+	@${MAKE} -B PUSHIMAGES=1 DOCKERIMAGE=pulcy/$(shell pulsar docker-tag) all push-manifest
