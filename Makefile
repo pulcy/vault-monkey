@@ -17,6 +17,11 @@ REPOPATH := $(ORGPATH)/$(REPONAME)
 
 MANIFESTTOOL := $(GOPATH)/bin/manifest-tool
 
+# Magical rubbish to teach make what commas and spaces are.
+EMPTY :=
+SPACE := $(EMPTY) $(EMPTY)
+COMMA := $(EMPTY),$(EMPTY)
+
 LINUX_ARCH:=amd64 arm arm64 ppc64le s390x
 PLATFORMS:=$(subst $(SPACE),$(COMMA),$(foreach arch,$(LINUX_ARCH),linux/$(arch)))
 
@@ -108,6 +113,7 @@ $(MANIFESTTOOL):
 
 .PHONY: push-manifest
 push-manifest: $(MANIFESTTOOL)
+	echo Pushing image for platforms $(PLATFORMS)
 	@$(MANIFESTTOOL) $(MANIFESTAUTH) push from-args \
     	--platforms $(PLATFORMS) \
     	--template $(DOCKERIMAGE)-ARCH \
