@@ -29,67 +29,148 @@ path "%s/*" {
 	clusterPolicyNameTmpl = "cluster_auth_%s"
 )
 
-type Cluster struct {
+// Cluster contains all vault methods to configure secrets for a cluster.
+type Cluster interface {
+	// Create creates the app-id mapping for a cluster with given id.
+	// It also creates and uses a policy for accessing only the jobs within the cluster.
+	Create(clusterID string) error
+	// Delete removes the app-id mapping for a cluster with given id.
+	// It also removes the policy for accessing only the jobs within the cluster.
+	Delete(clusterID string) error
+	// AddMachine creates the user-id mapping for adding a machine to a cluster.
+	AddMachine(clusterID, machineID, cidrBlock string) error
+	// RemoveMachine removes the user-id mapping for removing a machine from a cluster.
+	RemoveMachine(clusterID, machineID string) error
+}
+
+// NewCluster creates a new Cluster manipulator for the given vault client.
+func NewCluster(vaultClient *api.Client, methods AuthMethod) Cluster {
+	return &cluster{
+		vaultClient: vaultClient,
+		methods:     methods,
+	}
+}
+
+type cluster struct {
 	vaultClient *api.Client
+	methods     AuthMethod
 }
 
 // Create creates the app-id mapping for a cluster with given id.
 // It also creates and uses a policy for accessing only the jobs within the cluster.
-func (c *Cluster) Create(clusterId string) error {
-	clusterId = strings.ToLower(clusterId)
-	policyName, err := c.createClusterPolicy(clusterId)
+func (c *cluster) Create(clusterID string) error {
+	clusterID = strings.ToLower(clusterID)
+	policyName, err := c.createClusterPolicy(clusterID)
 	if err != nil {
 		return maskAny(err)
 	}
-	path := fmt.Sprintf("auth/app-id/map/app-id/%s", clusterId)
-	data := make(map[string]interface{})
-	data["value"] = policyName
-	data["display_name"] = clusterId
-	if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
-		return maskAny(err)
+	if c.methods.IsEnabled(AuthMethodAppRole) {
+		// Create role
+		{
+			path := fmt.Sprintf("auth/approle/role/%s", clusterID)
+			data := make(map[string]interface{})
+			data["role_name"] = clusterID
+			data["bind_secret_id"] = true
+			data["policies"] = policyName
+			data["secret_id_num_uses"] = 0
+			if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
+				return maskAny(err)
+			}
+		}
+		// Set role_id
+		{
+			path := fmt.Sprintf("auth/approle/role/%s/role-id", clusterID)
+			data := make(map[string]interface{})
+			data["role_id"] = clusterID
+			if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
+				return maskAny(err)
+			}
+		}
+	}
+	if c.methods.IsEnabled(AuthMethodAppID) {
+		path := fmt.Sprintf("auth/app-id/map/app-id/%s", clusterID)
+		data := make(map[string]interface{})
+		data["value"] = policyName
+		data["display_name"] = clusterID
+		if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
+			return maskAny(err)
+		}
 	}
 	return nil
 }
 
 // Delete removes the app-id mapping for a cluster with given id.
 // It also removes the policy for accessing only the jobs within the cluster.
-func (c *Cluster) Delete(clusterId string) error {
-	clusterId = strings.ToLower(clusterId)
-	path := fmt.Sprintf("auth/app-id/map/app-id/%s", clusterId)
-	if _, err := c.vaultClient.Logical().Delete(path); err != nil {
-		return maskAny(err)
+func (c *cluster) Delete(clusterID string) error {
+	clusterID = strings.ToLower(clusterID)
+	if c.methods.IsEnabled(AuthMethodAppRole) {
+		path := fmt.Sprintf("auth/approle/role/%s", clusterID)
+		if _, err := c.vaultClient.Logical().Delete(path); err != nil {
+			return maskAny(err)
+		}
 	}
-	// TODO remove all user-id mappings for this cluster-id (don't see a way how yet)
-	// TODO remove all tokens created for this app-id (don't see a way how yet)
-	policyName := fmt.Sprintf(clusterPolicyNameTmpl, clusterId)
+	if c.methods.IsEnabled(AuthMethodAppID) {
+		path := fmt.Sprintf("auth/app-id/map/app-id/%s", clusterID)
+		if _, err := c.vaultClient.Logical().Delete(path); err != nil {
+			return maskAny(err)
+		}
+		// TODO remove all user-id mappings for this cluster-id (don't see a way how yet)
+		// TODO remove all tokens created for this app-id (don't see a way how yet)
+	}
+	policyName := fmt.Sprintf(clusterPolicyNameTmpl, clusterID)
 	if err := c.vaultClient.Sys().DeletePolicy(policyName); err != nil {
 		return maskAny(err)
 	}
+
 	return nil
 }
 
 // AddMachine creates the user-id mapping for adding a machine to a cluster.
-func (c *Cluster) AddMachine(clusterId, machineId, cidrBlock string) error {
-	clusterId = strings.ToLower(clusterId)
-	machineId = strings.ToLower(machineId)
-	path := fmt.Sprintf("auth/app-id/map/user-id/%s", machineId)
-	data := make(map[string]interface{})
-	data["value"] = clusterId
-	if cidrBlock != "" {
-		data["cidr_block"] = cidrBlock
+func (c *cluster) AddMachine(clusterID, machineID, cidrBlock string) error {
+	clusterID = strings.ToLower(clusterID)
+	machineID = strings.ToLower(machineID)
+	if c.methods.IsEnabled(AuthMethodAppRole) {
+		path := fmt.Sprintf("auth/approle/role/%s/custom-secret-id", clusterID)
+		data := make(map[string]interface{})
+		data["secret_id"] = machineID
+		if cidrBlock != "" {
+			data["cidr_list"] = cidrBlock
+		}
+		if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
+			return maskAny(err)
+		}
 	}
-	if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
-		return maskAny(err)
+	if c.methods.IsEnabled(AuthMethodAppID) {
+		path := fmt.Sprintf("auth/app-id/map/user-id/%s", machineID)
+		data := make(map[string]interface{})
+		data["value"] = clusterID
+		if cidrBlock != "" {
+			data["cidr_block"] = cidrBlock
+		}
+		if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
+			return maskAny(err)
+		}
 	}
 	return nil
 }
 
 // RemoveMachine removes the user-id mapping for removing a machine from a cluster.
-func (c *Cluster) RemoveMachine(machineId string) error {
-	machineId = strings.ToLower(machineId)
-	path := fmt.Sprintf("auth/app-id/map/user-id/%s", machineId)
-	if _, err := c.vaultClient.Logical().Delete(path); err != nil {
-		return maskAny(err)
+func (c *cluster) RemoveMachine(clusterID, machineID string) error {
+	clusterID = strings.ToLower(clusterID)
+	machineID = strings.ToLower(machineID)
+	if c.methods.IsEnabled(AuthMethodAppRole) {
+		path := fmt.Sprintf("/auth/approle/role/%s/secret-id/destroy", clusterID)
+		data := make(map[string]interface{})
+		data["secret_id"] = machineID
+		if _, err := c.vaultClient.Logical().Write(path, data); err != nil {
+			return maskAny(err)
+		}
+	}
+	if c.methods.IsEnabled(AuthMethodAppID) {
+		path := fmt.Sprintf("auth/app-id/map/user-id/%s", machineID)
+		if _, err := c.vaultClient.Logical().Delete(path); err != nil {
+			return maskAny(err)
+		}
 	}
 	return nil
 }
@@ -97,10 +178,10 @@ func (c *Cluster) RemoveMachine(machineId string) error {
 // createClusterPolicy creates and writes a policy into the vault for accessing the
 // cluster-auth data of the first step of the server authentication.
 // It returns the policy name and any error.
-func (c *Cluster) createClusterPolicy(clusterId string) (string, error) {
-	clusterId = strings.ToLower(clusterId)
-	policy := fmt.Sprintf(clusterPolicyTmpl, clusterAuthPathPrefix+clusterId)
-	policyName := fmt.Sprintf(clusterPolicyNameTmpl, clusterId)
+func (c *cluster) createClusterPolicy(clusterID string) (string, error) {
+	clusterID = strings.ToLower(clusterID)
+	policy := fmt.Sprintf(clusterPolicyTmpl, clusterAuthPathPrefix+clusterID)
+	policyName := fmt.Sprintf(clusterPolicyNameTmpl, clusterID)
 	if err := c.vaultClient.Sys().PutPolicy(policyName, policy); err != nil {
 		return "", maskAny(err)
 	}

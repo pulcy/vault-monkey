@@ -53,7 +53,7 @@ func (config *IssueConfig) IssueIsNeeded(log *logging.Logger) bool {
 }
 
 // IssueETCDCertificate issues a new certificate for a specific service.
-func (c *CA) IssueETCDCertificate(clusterID string, config IssueConfig) error {
+func (c *ca) IssueETCDCertificate(clusterID string, config IssueConfig) error {
 	if config.Role == "" {
 		config.Role = roleMember
 	}
@@ -64,7 +64,7 @@ func (c *CA) IssueETCDCertificate(clusterID string, config IssueConfig) error {
 }
 
 // IssueK8sCertificate issues a new certificate for a specific service.
-func (c *CA) IssueK8sCertificate(clusterID string, config IssueConfig) error {
+func (c *ca) IssueK8sCertificate(clusterID string, config IssueConfig) error {
 	if config.Role == "" {
 		config.Role = roleOperations
 	}
@@ -75,7 +75,7 @@ func (c *CA) IssueK8sCertificate(clusterID string, config IssueConfig) error {
 }
 
 // IssueCertificate issues a new certificate for a specific service.
-func (c *CA) IssueCertificate(clusterID, service string, config IssueConfig) error {
+func (c *ca) IssueCertificate(clusterID, service string, config IssueConfig) error {
 	config.SetupDefaults(clusterID)
 	os.MkdirAll(config.OutputDir, 0755)
 	certPath := filepath.Join(config.OutputDir, config.CertificateFileName)

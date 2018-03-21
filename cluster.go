@@ -112,6 +112,7 @@ func cmdClusterAddMachineRun(cmd *cobra.Command, args []string) {
 }
 
 func cmdClusterRemoveMachineRun(cmd *cobra.Command, args []string) {
+	assertArgIsSet(clusterFlags.clusterID, "cluster-id")
 	assertArgIsSet(clusterFlags.machineID, "machine-id")
 
 	_, c, err := adminLogin()
@@ -120,7 +121,7 @@ func cmdClusterRemoveMachineRun(cmd *cobra.Command, args []string) {
 	}
 
 	cluster := c.Cluster()
-	if err := cluster.RemoveMachine(clusterFlags.machineID); err != nil {
+	if err := cluster.RemoveMachine(clusterFlags.clusterID, clusterFlags.machineID); err != nil {
 		Exitf("Failed to remove machine from cluster: %v", err)
 	}
 }

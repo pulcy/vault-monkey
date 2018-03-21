@@ -69,6 +69,8 @@ func init() {
 	cmdMain.PersistentFlags().StringVarP(&globalFlags.ghToken, "github-token", "G", "", "Personal github token for administrator logins")
 	cmdMain.PersistentFlags().BoolVar(&globalFlags.IPv4Only, "vault-ipv4-only", globalFlags.IPv4Only, "If set, only use IPv4 addresses")
 	cmdMain.PersistentFlags().BoolVar(&globalFlags.IPv6Only, "vault-ipv6-only", globalFlags.IPv6Only, "If set, only use IPv6 addresses")
+	cmdMain.PersistentFlags().BoolVar(&globalFlags.DisableAppID, "vault-disable-app-id", globalFlags.DisableAppID, "If set, do not use app-id authentication")
+	cmdMain.PersistentFlags().BoolVar(&globalFlags.DisableAppRole, "vault-disable-approle", globalFlags.DisableAppRole, "If set, do not use approle authentication")
 }
 
 func main() {

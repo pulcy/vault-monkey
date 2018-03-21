@@ -28,12 +28,14 @@ import (
 )
 
 type VaultServiceConfig struct {
-	VaultAddr   string // URL of the vault
-	VaultCACert string // Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate
-	VaultCAPath string // Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate
-	TokenPath   string // Path of a file containing the login token
-	IPv4Only    bool   // If set, only use IPv4 addresses
-	IPv6Only    bool   // If set, only use IPv6 addresses
+	VaultAddr      string // URL of the vault
+	VaultCACert    string // Path to a PEM-encoded CA cert file to use to verify the Vault server SSL certificate
+	VaultCAPath    string // Path to a directory of PEM-encoded CA cert files to verify the Vault server SSL certificate
+	TokenPath      string // Path of a file containing the login token
+	IPv4Only       bool   // If set, only use IPv4 addresses
+	IPv6Only       bool   // If set, only use IPv6 addresses
+	DisableAppID   bool   // If set, AppID authentication is disabled
+	DisableAppRole bool   // If set, AppRole authentication is disabled
 }
 
 type VaultService struct {
@@ -44,6 +46,7 @@ type VaultService struct {
 	certPool     *x509.CertPool
 	ipv4Only     bool // If set, only use IPv4 addresses
 	ipv6Only     bool // If set, only use IPv6 addresses
+	authMethods  AuthMethod
 }
 
 type VaultClient struct {
@@ -91,6 +94,13 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 			return nil, maskAny(err)
 		}
 	}
+	var methods AuthMethod
+	if !srvCfg.DisableAppID {
+		methods = methods | AuthMethodAppID
+	}
+	if !srvCfg.DisableAppRole {
+		methods = methods | AuthMethodAppRole
+	}
 
 	return &VaultService{
 		log:          log,
@@ -100,6 +110,7 @@ func NewVaultService(log *logging.Logger, srvCfg VaultServiceConfig) (*VaultServ
 		certPool:     newCertPool,
 		ipv4Only:     srvCfg.IPv4Only,
 		ipv6Only:     srvCfg.IPv6Only,
+		authMethods:  methods,
 	}, nil
 }
 
@@ -260,5 +271,9 @@ func (s *VaultService) asyncForEachClient(f func(client VaultClient) error) erro
 }
 
 func (s *VaultService) newAuthenticatedClient(vaultClient *api.Client) *AuthenticatedVaultClient {
-	return &AuthenticatedVaultClient{log: s.log, vaultClient: vaultClient}
+	return &AuthenticatedVaultClient{
+		log:         s.log,
+		vaultClient: vaultClient,
+		authMethods: s.authMethods,
+	}
 }
