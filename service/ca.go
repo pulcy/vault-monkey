@@ -40,6 +40,12 @@ type CA interface {
 	ListK8sCertificates(clusterID string) error
 	// ListCertificates issues a new certificate for a specific service.
 	ListCertificates(clusterID, service string) error
+	// TidyETCDCertificates performs cleanup of the expired ETCD certificates.
+	TidyETCDCertificates(clusterID string, options TidyOptions) error
+	// TidyK8sCertificates performs cleanup of the expired kubernetes certificates.
+	TidyK8sCertificates(clusterID string, options TidyOptions) error
+	// TidyCertificates performs cleanup of expired certificates for a specific service.
+	TidyCertificates(clusterID, service string, options TidyOptions) error
 }
 
 // NewCA creates a new CA manipulator for the given vault client.
