@@ -19,23 +19,29 @@ import (
 	"github.com/op/go-logging"
 )
 
+// AuthenticatedVaultClient holds a vault client that is already authenticated.
 type AuthenticatedVaultClient struct {
 	log         *logging.Logger
 	vaultClient *api.Client
+	authMethods AuthMethod
 }
 
+// Cluster returns a helper to configure cluster authentication secrets.
 func (c *AuthenticatedVaultClient) Cluster() Cluster {
-	return Cluster{vaultClient: c.vaultClient}
+	return NewCluster(c.vaultClient, c.authMethods)
 }
 
+// Job returns a helper to configure job authentication secrets.
 func (c *AuthenticatedVaultClient) Job() Job {
-	return Job{vaultClient: c.vaultClient}
+	return NewJob(c.vaultClient, c.authMethods)
 }
 
+// Token returns the current token of the vault client.
 func (c *AuthenticatedVaultClient) Token() string {
 	return c.vaultClient.Token()
 }
 
+// CA returns a helper to configure certificate authority authentication secrets.
 func (c *AuthenticatedVaultClient) CA() CA {
-	return CA{log: c.log, vaultClient: c.vaultClient}
+	return NewCA(c.log, c.vaultClient, c.authMethods)
 }

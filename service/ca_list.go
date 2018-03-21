@@ -13,7 +13,7 @@ import (
 )
 
 // ListETCDCertificates issues a new certificate for a specific service.
-func (c *CA) ListETCDCertificates(clusterID string) error {
+func (c *ca) ListETCDCertificates(clusterID string) error {
 	if err := c.ListCertificates(clusterID, "etcd"); err != nil {
 		return maskAny(err)
 	}
@@ -21,7 +21,7 @@ func (c *CA) ListETCDCertificates(clusterID string) error {
 }
 
 // ListK8sCertificates issues a new certificate for a specific service.
-func (c *CA) ListK8sCertificates(clusterID string) error {
+func (c *ca) ListK8sCertificates(clusterID string) error {
 	if err := c.ListCertificates(clusterID, "k8s"); err != nil {
 		return maskAny(err)
 	}
@@ -29,7 +29,7 @@ func (c *CA) ListK8sCertificates(clusterID string) error {
 }
 
 // ListCertificates issues a new certificate for a specific service.
-func (c *CA) ListCertificates(clusterID, service string) error {
+func (c *ca) ListCertificates(clusterID, service string) error {
 	mountPoint := c.createMountPoint(clusterID, service)
 	listPath := path.Join(mountPoint, "certs")
 	secret, err := c.vaultClient.Logical().List(listPath)
@@ -59,7 +59,7 @@ func (c *CA) ListCertificates(clusterID, service string) error {
 	return nil
 }
 
-func (c *CA) showCertificate(clusterID, service, serial string) (string, error) {
+func (c *ca) showCertificate(clusterID, service, serial string) (string, error) {
 	mountPoint := c.createMountPoint(clusterID, service)
 	certPath := path.Join(mountPoint, "cert", serial)
 	secret, err := c.vaultClient.Logical().Read(certPath)

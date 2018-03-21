@@ -19,19 +19,52 @@ const (
 	compNameKubeServiceAccounts = "kube-serviceaccounts"
 )
 
-type CA struct {
+// CA contains all functions to configure CA secrets
+type CA interface {
+	// CreateETCDMembers creates a CA that issues ETCD member certificates.
+	CreateETCDMembers(clusterID, domainName string, force bool) error
+	// CreateK8sAll creates CA's that issues K8S member certificates for all K8S components.
+	// Each component gets its own CA.
+	CreateK8sAll(clusterID, domainName string, force bool) error
+	// CreateK8s creates a CA that issues K8S member certificates for the various K8S components.
+	CreateK8s(clusterID, component, domainName string, force bool) error
+	// IssueETCDCertificate issues a new certificate for a specific service.
+	IssueETCDCertificate(clusterID string, config IssueConfig) error
+	// IssueK8sCertificate issues a new certificate for a specific service.
+	IssueK8sCertificate(clusterID string, config IssueConfig) error
+	// IssueCertificate issues a new certificate for a specific service.
+	IssueCertificate(clusterID, service string, config IssueConfig) error
+	// ListETCDCertificates issues a new certificate for a specific service.
+	ListETCDCertificates(clusterID string) error
+	// ListK8sCertificates issues a new certificate for a specific service.
+	ListK8sCertificates(clusterID string) error
+	// ListCertificates issues a new certificate for a specific service.
+	ListCertificates(clusterID, service string) error
+}
+
+// NewCA creates a new CA manipulator for the given vault client.
+func NewCA(log *logging.Logger, vaultClient *api.Client, methods AuthMethod) CA {
+	return &ca{
+		log:         log,
+		vaultClient: vaultClient,
+		methods:     methods,
+	}
+}
+
+type ca struct {
 	log         *logging.Logger
 	vaultClient *api.Client
+	methods     AuthMethod
 }
 
 // createMountPoint creates the mointpoint for the PKI secret backend in the vault, based on the given
 // cluster-ID and service name.
-func (c *CA) createMountPoint(clusterID, service string) string {
+func (c *ca) createMountPoint(clusterID, service string) string {
 	return path.Join("ca", clusterID, "pki", service)
 }
 
 // CreateETCDMembers creates a CA that issues ETCD member certificates.
-func (c *CA) CreateETCDMembers(clusterID, domainName string, force bool) error {
+func (c *ca) CreateETCDMembers(clusterID, domainName string, force bool) error {
 	mountPoint := c.createMountPoint(clusterID, "etcd")
 	if err := c.createRoot(mountPoint, domainName, "etcd", force); err != nil {
 		return maskAny(err)
@@ -60,7 +93,7 @@ func (c *CA) CreateETCDMembers(clusterID, domainName string, force bool) error {
 
 // CreateK8sAll creates CA's that issues K8S member certificates for all K8S components.
 // Each component gets its own CA.
-func (c *CA) CreateK8sAll(clusterID, domainName string, force bool) error {
+func (c *ca) CreateK8sAll(clusterID, domainName string, force bool) error {
 	components := []string{"kubelet", "kube-proxy", "kube-apiserver", "kube-controller-manager", "kube-scheduler", "kube-dns"}
 	for _, component := range components {
 		if err := c.CreateK8s(clusterID, component, domainName, force); err != nil {
@@ -81,7 +114,7 @@ func (c *CA) CreateK8sAll(clusterID, domainName string, force bool) error {
 }
 
 // CreateK8s creates a CA that issues K8S member certificates for the various K8S components.
-func (c *CA) CreateK8s(clusterID, component, domainName string, force bool) error {
+func (c *ca) CreateK8s(clusterID, component, domainName string, force bool) error {
 	mountPoint := c.createMountPoint(clusterID, "k8s")
 	if err := c.createRoot(mountPoint, domainName, "k8s", force); err != nil {
 		return maskAny(err)
@@ -121,7 +154,7 @@ func (c *CA) CreateK8s(clusterID, component, domainName string, force bool) erro
 
 // createK8sServiceAccountToken creates a service-account-token secret used by K8S.
 // Roles & policies to access it are also created.
-func (c *CA) createK8sServiceAccountToken(clusterID string, force bool) error {
+func (c *ca) createK8sServiceAccountToken(clusterID string, force bool) error {
 	tokenSecretPath := path.Join("secret", clusterID, "k8s", "token")
 	// Create and store secret
 	if err := c.createK8sServiceAccountTokenSecret(tokenSecretPath, force); err != nil {
@@ -146,7 +179,7 @@ func (c *CA) createK8sServiceAccountToken(clusterID string, force bool) error {
 }
 
 // createK8sServiceAccountTokenSecret creates the actual token secret (if not exists or forced)
-func (c *CA) createK8sServiceAccountTokenSecret(secretPath string, force bool) error {
+func (c *ca) createK8sServiceAccountTokenSecret(secretPath string, force bool) error {
 	secretField := "key"
 	if !force {
 		// Look if secret already exists
@@ -180,7 +213,7 @@ func (c *CA) createK8sServiceAccountTokenSecret(secretPath string, force bool) e
 
 // createRoot mounts the PKI backend at the given mountpoint and
 // creates the root certificate.
-func (c *CA) createRoot(mountPoint, domain, service string, force bool) error {
+func (c *ca) createRoot(mountPoint, domain, service string, force bool) error {
 	// Check if there is already a PKI mounted at the given mountpoint
 	mounts, err := c.vaultClient.Sys().ListMounts()
 	if err != nil {
@@ -221,7 +254,7 @@ func (c *CA) createRoot(mountPoint, domain, service string, force bool) error {
 }
 
 // createAnyNameRole creates a CA role that allows any common name and certificates with a TTL up to 30 days.
-func (c *CA) createAnyNameRole(mountPoint, role string) error {
+func (c *ca) createAnyNameRole(mountPoint, role string) error {
 	relPath := path.Join(mountPoint, "roles", role)
 	data := make(map[string]interface{})
 	data["allow_any_name"] = "true"
@@ -233,7 +266,7 @@ func (c *CA) createAnyNameRole(mountPoint, role string) error {
 }
 
 // createIssuePolicy creates a mountpoint specific role that allows issueing certificates.
-func (c *CA) createIssuePolicy(mountPoint, role string) (string, error) {
+func (c *ca) createIssuePolicy(mountPoint, role string) (string, error) {
 	c.log.Debugf("creating issue policy for %s with role %s", mountPoint, role)
 	issuePath := path.Join(mountPoint, "issue", role)
 	rules := []string{
@@ -250,7 +283,7 @@ func (c *CA) createIssuePolicy(mountPoint, role string) (string, error) {
 }
 
 // createIssuePolicy creates a mountpoint specific role that allows issueing certificates.
-func (c *CA) createReadSecretPolicy(secretPath, role string) (string, error) {
+func (c *ca) createReadSecretPolicy(secretPath, role string) (string, error) {
 	c.log.Debugf("creating read secret policy for %s with role %s", secretPath, role)
 	rules := []string{
 		fmt.Sprintf(caPolicyPathReadTemplate, secretPath),
@@ -266,7 +299,7 @@ func (c *CA) createReadSecretPolicy(secretPath, role string) (string, error) {
 }
 
 // createTokenRole creates a token role with given name and given allowed policies.
-func (c *CA) createTokenRole(role string, policies []string) error {
+func (c *ca) createTokenRole(role string, policies []string) error {
 	relPath := path.Join("auth/token/roles", role)
 	c.log.Debugf("creating token role at %s", relPath)
 	data := map[string]interface{}{
@@ -282,13 +315,13 @@ func (c *CA) createTokenRole(role string, policies []string) error {
 }
 
 // createJob creates a job such that vault-monkey can authenticate access it.
-func (c *CA) createJob(clusterID, service, component, policyName string) error {
+func (c *ca) createJob(clusterID, service, component, policyName string) error {
 	jobID := fmt.Sprintf("ca-%s-pki-%s", clusterID, service)
 	if component != "" {
 		jobID = fmt.Sprintf("%s-%s", jobID, component)
 	}
 	c.log.Debugf("creating job %s with policy %s", jobID, policyName)
-	j := Job{c.vaultClient}
+	j := NewJob(c.vaultClient, c.methods)
 	if err := j.Create(jobID, policyName); err != nil {
 		return maskAny(err)
 	}
