@@ -15,6 +15,11 @@ REPONAME := $(PROJECT)
 REPODIR := $(ORGDIR)/$(REPONAME)
 REPOPATH := $(ORGPATH)/$(REPONAME)
 
+MANIFESTTOOL := $(GOPATH)/bin/manifest-tool
+
+LINUX_ARCH:=amd64 arm arm64 ppc64le s390x
+PLATFORMS:=$(subst $(SPACE),$(COMMA),$(foreach arch,$(LINUX_ARCH),linux/$(arch)))
+
 GOPATH := $(GOBUILDDIR)
 GOVERSION := 1.10.0-alpine
 
@@ -28,17 +33,26 @@ endif
 BINNAME := $(PROJECT)-$(GOOS)-$(GOARCH)
 BIN := $(BINDIR)/$(BINNAME)
 
+ifndef DOCKERIMAGE
+	DOCKERIMAGE := $(PROJECT):dev
+endif
+
 SOURCES := $(shell find $(SRCDIR) -name '*.go')
 
 .PHONY: all clean deps build
 
-all: build
+all: build-archs
 
 build: $(BIN)
 
 local:
 	@${MAKE} -B GOOS=$(shell go env GOHOSTOS) GOARCH=$(shell go env GOHOSTARCH) build
 	@ln -sf bin/$(PROJECT)-$(shell go env GOHOSTOS)-$(shell go env GOHOSTARCH) $(PROJECT)
+
+build-archs:
+	for arch in $(LINUX_ARCH); do \
+		$(MAKE) -B DOCKERIMAGE=$(DOCKERIMAGE) GOARCH=$$arch docker ;\
+	done
 
 clean:
 	rm -Rf bin $(GOBUILDDIR)
@@ -85,3 +99,20 @@ $(BIN): $(GOBUILDDIR) $(SOURCES)
 		-w /usr/code/ \
 		golang:$(GOVERSION) \
 		go build -installsuffix netgo -tags netgo -ldflags "-X main.projectVersion=$(VERSION) -X main.projectBuild=$(COMMIT)" -o /usr/code/bin/$(BINNAME) $(REPOPATH)
+
+docker: $(BIN)
+	docker build --build-arg arch=$(GOARCH) -t $(DOCKERIMAGE)-$(GOARCH) -f Dockerfile.build .
+
+$(MANIFESTTOOL):
+	go get github.com/estesp/manifest-tool
+
+.PHONY: push-manifest
+push-manifest: $(MANIFESTTOOL)
+	@$(MANIFESTTOOL) $(MANIFESTAUTH) push from-args \
+    	--platforms $(PLATFORMS) \
+    	--template $(DOCKERIMAGE)-ARCH \
+    	--target $(DOCKERIMAGE)
+
+.PHONY: release
+release:
+	@${MAKE} -B DOCKERIMAGE=pulcy/$(shell pulsar docker-tag) all push-manifest

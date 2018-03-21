@@ -2,5 +2,8 @@
 	"registry": "pulcy",
 	"image": "vault-monkey",
 	"tag-latest": true,
-	"go-vendor-dir": "deps"
+	"go-vendor-dir": "deps",
+    "targets": {
+        "release": "release"
+    }
 }
